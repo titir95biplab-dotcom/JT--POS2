@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Juice Therapy Majherhati - Smart POS</title>
-    <meta name="theme-color" content="#7C3AED">
+    <meta name="theme-color" content="#16052E">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="logo.png" type="image/png">
     
@@ -59,16 +59,16 @@ async function trackUserActivity(phone) {
     
     <style>
         :root {
-            --primary: #7C3AED;
-            --secondary: #1E1028;
-            --bg: #121212;
-            --surface: #1E1E2E;
+            --primary: #F5E642;
+            --secondary: #2E0F52;
+            --bg: #16052E;
+            --surface: #220840;
             --text: #FFFFFF;
-            --text-muted: #A0A0A0;
-            --success: #4CAF50;
-            --danger: #FF5252;
-            --warning: #FFC107;
-            --info: #2196F3;
+            --text-muted: #C4A8E0;
+            --success: #34D399;
+            --danger: #F87171;
+            --warning: #FB923C;
+            --info: #818CF8;
             --radius: 12px;
             --spacing: 16px;
         }
@@ -131,7 +131,7 @@ async function trackUserActivity(phone) {
         }
         .btn:active { transform: scale(0.98); }
         .btn-sm { padding: 6px 12px; font-size: 0.8rem; }
-        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary { background: var(--primary); color: #16052E; font-weight: 700; }
         .btn-secondary { background: rgba(255,255,255,0.1); color: white; }
         .btn-danger { background: rgba(255, 82, 82, 0.2); color: var(--danger); }
         .btn-success { background: var(--success); color: white; }
@@ -169,7 +169,7 @@ async function trackUserActivity(phone) {
             padding: 10px 5px; font-size: 0.75rem; background: rgba(255,255,255,0.05); 
             border-radius: 6px; text-align: center; cursor: pointer; word-break: break-word; line-height: 1.2;
         }
-        .cat-btn.active { background: var(--primary); color: white; font-weight: bold; }
+        .cat-btn.active { background: var(--primary); color: #16052E; font-weight: bold; }
 
         .item-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; overflow-y: auto; align-content: start; padding-bottom: 50px; }
         /* Updated Item Card Design */
@@ -298,7 +298,7 @@ async function trackUserActivity(phone) {
 <body>
 
     <div id="notification"></div>
-    <button id="pwaInstallBtn" class="btn btn-primary hidden" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; box-shadow: 0 4px 15px rgba(124, 58, 237, 0.4);">
+    <button id="pwaInstallBtn" class="btn btn-primary hidden" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; box-shadow: 0 4px 15px rgba(245, 230, 66, 0.4);">
     📲 Install App
 </button>
 
@@ -769,7 +769,7 @@ async function trackUserActivity(phone) {
         <button class="btn btn-secondary btn-sm" onclick="contactStore('save')">💾 Save No.</button>
     </div>
 </div>
-            <div class="card text-center" style="background: linear-gradient(135deg, var(--primary), #F59E0B);">
+            <div class="card text-center" style="background: linear-gradient(135deg, #F5E642, #F59E0B);">
                 <h3>Welcome, <span id="custNameDisplay">Guest</span></h3>
                 <h1 style="font-size: 3rem; margin: 10px 0;" id="custPoints">0</h1>
                 <p>Bonus Points Available</p>
@@ -1914,8 +1914,8 @@ function renderSalesChart(dailyData) {
             datasets: [{
                 label: 'Daily Sales (₹)',
                 data: dataPoints,
-                borderColor: '#7C3AED', // Your Primary Brand Color
-                backgroundColor: 'rgba(124, 58, 237, 0.2)',
+                borderColor: '#F5E642', // Your Primary Brand Color
+                backgroundColor: 'rgba(245, 230, 66, 0.15)',
                 borderWidth: 2,
                 tension: 0.3, // Curve smoothing
                 fill: true,
@@ -2561,7 +2561,7 @@ function filterMenu(text) {
                         : '';
                     
                     // Highlight if selected
-                    const selectedStyle = qty > 0 ? 'border-color: var(--primary); background: rgba(124, 58, 237, 0.15);' : '';
+                    const selectedStyle = qty > 0 ? 'border-color: var(--primary); background: rgba(245, 230, 66, 0.15);' : '';
 
                     return `
                     <div class="menu-item" onclick="addToCart('${item.id}')" style="${selectedStyle}">
@@ -2848,8 +2848,8 @@ async function searchHistory() {
             
             // Determine status color
             let statusColor = '#4CAF50'; // Default success
-            if(o.status === 'cancelled') statusColor = '#FF5252';
-            if(o.status === 'pending') statusColor = '#FFC107';
+            if(o.status === 'cancelled') statusColor = '#F87171';
+            if(o.status === 'pending') statusColor = '#FB923C';
 
             return `
             <div class="order-card" onclick="viewOrderDetails('${o.id}')" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
@@ -3636,7 +3636,7 @@ function filterCustomerMenu(text) {
             
             // Badge & Styling
             const qtyBadge = qty > 0 ? `<div style="position:absolute; top:8px; right:8px; background:white; color:var(--primary); width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.3); font-size:0.8rem;">${qty}</div>` : '';
-            const borderStyle = qty > 0 ? 'border: 1px solid var(--primary); background: rgba(124, 58, 237, 0.1);' : '';
+            const borderStyle = qty > 0 ? 'border: 1px solid var(--primary); background: rgba(245, 230, 66, 0.1);' : '';
 
             return `
             <div class="menu-item" onclick="addToCart('${item.id}')" style="position:relative; ${borderStyle}">
