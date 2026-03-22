@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Juice Therapy Majherhati - Smart POS</title>
-    <meta name="theme-color" content="#FF6B35">
+    <meta name="theme-color" content="#7C3AED">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="logo.png" type="image/png">
     
@@ -59,8 +59,8 @@ async function trackUserActivity(phone) {
     
     <style>
         :root {
-            --primary: #FF6B35;
-            --secondary: #1A1A2E;
+            --primary: #7C3AED;
+            --secondary: #1E1028;
             --bg: #121212;
             --surface: #1E1E2E;
             --text: #FFFFFF;
@@ -298,7 +298,7 @@ async function trackUserActivity(phone) {
 <body>
 
     <div id="notification"></div>
-    <button id="pwaInstallBtn" class="btn btn-primary hidden" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; box-shadow: 0 4px 15px rgba(255, 107, 53, 0.4);">
+    <button id="pwaInstallBtn" class="btn btn-primary hidden" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; box-shadow: 0 4px 15px rgba(124, 58, 237, 0.4);">
     📲 Install App
 </button>
 
@@ -769,7 +769,7 @@ async function trackUserActivity(phone) {
         <button class="btn btn-secondary btn-sm" onclick="contactStore('save')">💾 Save No.</button>
     </div>
 </div>
-            <div class="card text-center" style="background: linear-gradient(135deg, var(--primary), #FF9F43);">
+            <div class="card text-center" style="background: linear-gradient(135deg, var(--primary), #F59E0B);">
                 <h3>Welcome, <span id="custNameDisplay">Guest</span></h3>
                 <h1 style="font-size: 3rem; margin: 10px 0;" id="custPoints">0</h1>
                 <p>Bonus Points Available</p>
@@ -1914,8 +1914,8 @@ function renderSalesChart(dailyData) {
             datasets: [{
                 label: 'Daily Sales (₹)',
                 data: dataPoints,
-                borderColor: '#FF6B35', // Your Primary Brand Color
-                backgroundColor: 'rgba(255, 107, 53, 0.2)',
+                borderColor: '#7C3AED', // Your Primary Brand Color
+                backgroundColor: 'rgba(124, 58, 237, 0.2)',
                 borderWidth: 2,
                 tension: 0.3, // Curve smoothing
                 fill: true,
@@ -2561,7 +2561,7 @@ function filterMenu(text) {
                         : '';
                     
                     // Highlight if selected
-                    const selectedStyle = qty > 0 ? 'border-color: var(--primary); background: rgba(255, 107, 53, 0.15);' : '';
+                    const selectedStyle = qty > 0 ? 'border-color: var(--primary); background: rgba(124, 58, 237, 0.15);' : '';
 
                     return `
                     <div class="menu-item" onclick="addToCart('${item.id}')" style="${selectedStyle}">
@@ -3636,7 +3636,7 @@ function filterCustomerMenu(text) {
             
             // Badge & Styling
             const qtyBadge = qty > 0 ? `<div style="position:absolute; top:8px; right:8px; background:white; color:var(--primary); width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.3); font-size:0.8rem;">${qty}</div>` : '';
-            const borderStyle = qty > 0 ? 'border: 1px solid var(--primary); background: rgba(255, 107, 53, 0.1);' : '';
+            const borderStyle = qty > 0 ? 'border: 1px solid var(--primary); background: rgba(124, 58, 237, 0.1);' : '';
 
             return `
             <div class="menu-item" onclick="addToCart('${item.id}')" style="position:relative; ${borderStyle}">
