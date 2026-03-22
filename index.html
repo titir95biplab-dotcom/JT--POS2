@@ -94,7 +94,7 @@ async function trackUserActivity(phone) {
         /* Discount Styles */
         .discount-applied {
             border: 2px solid var(--success) !important;
-            background: rgba(76, 175, 80, 0.1) !important;
+            background: rgba(52, 211, 153, 0.13) !important;
         }
         .discount-badge {
             position: absolute;
@@ -106,7 +106,7 @@ async function trackUserActivity(phone) {
             border-radius: 12px;
             font-size: 0.7rem;
             font-weight: bold;
-            box-shadow: 0 2px 8px rgba(76, 175, 80, 0.5);
+            box-shadow: 0 2px 8px rgba(52, 211, 153, 0.5);
         }
         .coupon-input-wrapper {
             position: relative;
@@ -132,14 +132,14 @@ async function trackUserActivity(phone) {
         .btn:active { transform: scale(0.98); }
         .btn-sm { padding: 6px 12px; font-size: 0.8rem; }
         .btn-primary { background: var(--primary); color: #16052E; font-weight: 700; }
-        .btn-secondary { background: rgba(255,255,255,0.1); color: white; }
-        .btn-danger { background: rgba(255, 82, 82, 0.2); color: var(--danger); }
+        .btn-secondary { background: rgba(196,168,224,0.18); color: #EDE9FE; }
+        .btn-danger { background: rgba(248, 113, 113, 0.2); color: var(--danger); }
         .btn-success { background: var(--success); color: white; }
         .btn-warning { background: var(--warning); color: black; }
         .btn-info { background: var(--info); color: white; }
         
         .input {
-            width: 100%; padding: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            width: 100%; padding: 12px; background: rgba(196,168,224,0.10); border: 1px solid rgba(196,168,224,0.16);
             border-radius: 8px; color: white; font-size: 1rem; margin-bottom: 10px;
         }
         .input:focus { outline: none; border-color: var(--primary); }
@@ -152,7 +152,7 @@ async function trackUserActivity(phone) {
         .logo { width: 120px; margin-bottom: 20px; }
 
         /* Header */
-        header { background: var(--surface); padding: 15px; position: sticky; top: 0; z-index: 50; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        header { background: var(--surface); padding: 15px; position: sticky; top: 0; z-index: 50; border-bottom: 1px solid rgba(196,168,224,0.10); }
         .header-content { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
 
         /* Layouts */
@@ -162,11 +162,11 @@ async function trackUserActivity(phone) {
         .pos-container { display: grid; grid-template-columns: 1fr 350px; gap: 20px; height: calc(100vh - 140px); }
         .pos-left { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
         
-        .menu-area { display: grid; grid-template-columns: 110px 1fr; gap: 15px; flex: 1; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 10px; background: rgba(255,255,255,0.02); }
+        .menu-area { display: grid; grid-template-columns: 110px 1fr; gap: 15px; flex: 1; overflow: hidden; border: 1px solid rgba(196,168,224,0.16); border-radius: 12px; padding: 10px; background: rgba(196,168,224,0.05); }
         
         .cat-sidebar { overflow-y: auto; padding-right: 5px; display: flex; flex-direction: column; gap: 8px; }
         .cat-btn { 
-            padding: 10px 5px; font-size: 0.75rem; background: rgba(255,255,255,0.05); 
+            padding: 10px 5px; font-size: 0.75rem; background: rgba(196,168,224,0.10); 
             border-radius: 6px; text-align: center; cursor: pointer; word-break: break-word; line-height: 1.2;
         }
         .cat-btn.active { background: var(--primary); color: #16052E; font-weight: bold; }
@@ -174,7 +174,7 @@ async function trackUserActivity(phone) {
         .item-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; overflow-y: auto; align-content: start; padding-bottom: 50px; }
         /* Updated Item Card Design */
         .menu-item { 
-            background: rgba(255,255,255,0.05); 
+            background: rgba(196,168,224,0.10); 
             border-radius: 12px; 
             cursor: pointer; 
             display: flex; 
@@ -189,7 +189,7 @@ async function trackUserActivity(phone) {
         }
         
         .menu-item:active { transform: scale(0.96); }
-        .menu-item:hover { border-color: var(--primary); background: rgba(255,255,255,0.08); }
+        .menu-item:hover { border-color: var(--primary); background: rgba(245,230,66,0.12); box-shadow: 0 0 0 1px rgba(245,230,66,0.4); }
 
         /* Item Name Limit (prevents overflow) */
         .item-name-clamp {
@@ -217,17 +217,17 @@ async function trackUserActivity(phone) {
         /* Cart Panel */
         .cart-panel { background: var(--surface); border-radius: 12px; padding: 15px; display: flex; flex-direction: column; height: 100%; }
         .cart-items { flex: 1; overflow-y: auto; margin: 10px 0; }
-        .cart-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .qty-controls { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; padding: 2px; }
+        .cart-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(196,168,224,0.10); }
+        .qty-controls { display: flex; align-items: center; gap: 8px; background: rgba(196,168,224,0.16); border-radius: 4px; padding: 2px; }
         .qty-btn { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-weight: bold; }
 
         /* Tabs */
         .tabs { display: flex; gap: 10px; margin-bottom: 15px; overflow-x: auto; padding-bottom: 5px; }
         .tab-btn { flex: 1; white-space: nowrap; }
-        .tab-btn.active { background: var(--primary); }
+        .tab-btn.active { background: var(--primary); color: #16052E; font-weight: 700; }
 
         /* Order Cards */
-        .order-card { padding: 15px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); margin-bottom: 10px; border-radius: 8px; }
+        .order-card { padding: 15px; background: rgba(196,168,224,0.07); border: 1px solid rgba(196,168,224,0.10); margin-bottom: 10px; border-radius: 8px; }
         .order-status { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; font-weight: bold; }
         .status-requested { background: var(--info); color: white; }
         .status-pending { background: var(--warning); color: black; }
@@ -235,15 +235,15 @@ async function trackUserActivity(phone) {
         .status-cancelled { background: var(--danger); color: white; }
 
         /* Admin Dashboard Cards */
-        .stat-card { background: var(--surface); padding: 20px; border-radius: 12px; text-align: center; border: 1px solid rgba(255,255,255,0.1); }
+        .stat-card { background: var(--surface); padding: 20px; border-radius: 12px; text-align: center; border: 1px solid rgba(196,168,224,0.16); }
         .stat-value { font-size: 2rem; font-weight: bold; color: var(--primary); margin: 10px 0; }
         .stat-label { font-size: 0.9rem; color: var(--text-muted); }
 
         /* Install Button */
-        #installBtn { position: fixed; bottom: 20px; right: 20px; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.5); display: none; }
+        #installBtn { position: fixed; bottom: 20px; right: 20px; z-index: 100; box-shadow: 0 4px 12px rgba(10,0,30,0.7); display: none; }
 
         /* Notification */
-        #notification { position: fixed; top: 20px; right: 20px; background: #333; padding: 15px 25px; border-radius: 8px; z-index: 1000; transform: translateX(150%); transition: 0.3s; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        #notification { position: fixed; top: 20px; right: 20px; background: #2E0F52; padding: 15px 25px; border-radius: 8px; z-index: 1000; transform: translateX(150%); transition: 0.3s; box-shadow: 0 4px 12px rgba(10,0,30,0.5); }
 
         /* Mobile Responsive */
         @media (max-width: 768px) {
@@ -298,7 +298,7 @@ async function trackUserActivity(phone) {
 <body>
 
     <div id="notification"></div>
-    <button id="pwaInstallBtn" class="btn btn-primary hidden" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; box-shadow: 0 4px 15px rgba(245, 230, 66, 0.4);">
+    <button id="pwaInstallBtn" class="btn btn-primary hidden" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; box-shadow: 0 4px 20px rgba(245,230,66,0.5);">
     📲 Install App
 </button>
 
@@ -471,7 +471,7 @@ async function trackUserActivity(phone) {
         </div>
 
         <div style="margin-top: 20px;">
-            <h4 style="margin-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom:5px;">Top Selling Items (Selected Date Range)</h4>
+            <h4 style="margin-bottom: 10px; border-bottom: 1px solid rgba(196,168,224,0.16); padding-bottom:5px;">Top Selling Items (Selected Date Range)</h4>
             <div id="topItemsList" style="max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;">
                 <p class="text-muted">Loading data...</p>
             </div>
@@ -492,7 +492,7 @@ async function trackUserActivity(phone) {
         <div style="overflow-x: auto;">
             <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
                 <thead>
-                    <tr style="border-bottom: 2px solid rgba(255,255,255,0.1);">
+                    <tr style="border-bottom: 2px solid rgba(196,168,224,0.16);">
                         <th style="padding: 10px;">Item Name</th>
                         <th style="padding: 10px; text-align: center;">Qty Sold</th>
                         <th style="padding: 10px; text-align: right;">Revenue Generated</th>
@@ -569,7 +569,7 @@ async function trackUserActivity(phone) {
         <input type="time" id="storeCloseTime" class="input">
     </div>
 
-    <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
+    <div style="background:rgba(196,168,224,0.10); padding:10px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
         <span>Outlet Status:</span>
         <label class="flex items-center gap-2" style="cursor:pointer;">
             <input type="checkbox" id="storeIsOpen" style="transform:scale(1.5);">
@@ -592,7 +592,7 @@ async function trackUserActivity(phone) {
                     <h3>🎫 Discount Coupons</h3>
                     <p class="text-muted" style="margin-bottom:15px; font-size:0.9rem;">Create and manage discount codes</p>
                     
-                    <div style="background:rgba(255,255,255,0.05); padding:15px; border-radius:8px; margin-bottom:15px;">
+                    <div style="background:rgba(196,168,224,0.10); padding:15px; border-radius:8px; margin-bottom:15px;">
                         <h4 style="margin-bottom:10px; font-size:1rem;">Create New Coupon</h4>
                         
                         <label class="text-muted" style="font-size:0.85rem;">Coupon Code</label>
@@ -681,16 +681,16 @@ async function trackUserActivity(phone) {
                         <input type="tel" id="posPhone" class="input" placeholder="Customer Phone (Auto-create)" maxlength="10">
                     </div>
                     <div class="cart-items" id="cartItemsList"></div>
-                    <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+                    <div style="border-top: 1px solid rgba(196,168,224,0.16); padding-top: 10px;">
                         <!-- Discount Coupon Section -->
-                        <div class="card" style="background: rgba(76, 175, 80, 0.05); border: 1px dashed rgba(76, 175, 80, 0.3); margin-bottom:10px;">
+                        <div class="card" style="background: rgba(52, 211, 153, 0.08); border: 1px dashed rgba(52, 211, 153, 0.35); margin-bottom:10px;">
                             <label class="text-muted" style="font-size:0.75rem; margin-bottom:6px; display:block;">🎫 Coupon Code</label>
                             <div class="flex gap-2" style="margin-bottom:5px;">
                                 <input type="text" id="posCouponCode" class="input" placeholder="Enter code" style="margin:0; text-transform:uppercase; flex:1; padding:8px; font-size:0.85rem;">
                                 <button class="btn btn-success btn-sm" onclick="applyPosCoupon()" style="padding:8px 12px; font-size:0.85rem;">Apply</button>
                             </div>
                             <div id="posCouponStatus" class="coupon-status hidden"></div>
-                            <div id="posAppliedDiscount" class="hidden" style="margin-top:8px; padding:8px; background:rgba(76,175,80,0.1); border-radius:6px; font-size:0.8rem;">
+                            <div id="posAppliedDiscount" class="hidden" style="margin-top:8px; padding:8px; background:rgba(52,211,153,0.13); border-radius:6px; font-size:0.8rem;">
                                 <div class="flex justify-between items-center">
                                     <div style="color:var(--success); font-weight:600;">✓ <span id="posDiscountCodeLabel"></span></div>
                                     <button class="btn btn-sm btn-danger" onclick="removePosCoupon()" style="padding:4px 8px; font-size:0.75rem;">Remove</button>
@@ -792,7 +792,7 @@ async function trackUserActivity(phone) {
                     <div class="cart-panel">
                         <h3>My Cart</h3>
                         <div class="cart-items" id="custCartItems"></div>
-                        <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+                        <div style="border-top: 1px solid rgba(196,168,224,0.16); padding-top: 10px;">
                             <div class="flex justify-between font-bold" style="font-size: 1.2rem; margin-bottom: 10px;">
                                 <span>Total</span>
                                 <span id="custCartTotal">₹0</span>
@@ -812,7 +812,7 @@ async function trackUserActivity(phone) {
         <div class="card" style="width: 90%; max-width: 400px;">
             
             <div id="paymentInputSection">
-                <h3 style="margin-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px;">Final Billing</h3>
+                <h3 style="margin-bottom: 15px; border-bottom: 1px solid rgba(196,168,224,0.16); padding-bottom: 10px;">Final Billing</h3>
                 
                 <div class="flex justify-between" style="margin-bottom: 10px;">
                     <span class="text-muted">Customer:</span>
@@ -824,7 +824,7 @@ async function trackUserActivity(phone) {
                     <span id="payBillTotal" class="font-bold" style="font-size: 1.2rem;">₹0</span>
                 </div>
 
-                <div id="bonusRedemptionSection" style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px; margin-bottom: 15px;">
+                <div id="bonusRedemptionSection" style="background: rgba(196,168,224,0.10); padding: 10px; border-radius: 8px; margin-bottom: 15px;">
                     <div class="flex justify-between items-center">
                         <span>Available Bonus:</span>
                         <span id="payAvailPoints" style="color: var(--primary); font-weight: bold;">0 pts</span>
@@ -836,7 +836,7 @@ async function trackUserActivity(phone) {
                     <div id="bonusInfoText" class="text-muted" style="font-size: 0.8rem; margin-top: 5px;">1 Point = ₹1 | New bonus will add to balance.</div>
                 </div>
 
-                <div style="margin-bottom: 15px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
+                <div style="margin-bottom: 15px; padding-top: 10px; border-top: 1px solid rgba(196,168,224,0.16);">
                     <label class="text-muted" style="font-size: 0.9rem; display: block; margin-bottom: 8px;">Payment Mode</label>
                     <div class="flex gap-2" style="margin-bottom: 10px;">
                         <button id="btnModeCash" class="btn btn-sm btn-primary w-full" onclick="setPaymentMode('Cash')">💵 Cash</button>
@@ -846,7 +846,7 @@ async function trackUserActivity(phone) {
                     <input type="hidden" id="paymentModeInput" value="Cash">
                     
                     <!-- Partial Payment Breakdown -->
-                    <div id="partialPaymentSection" class="hidden" style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px; margin-top: 10px;">
+                    <div id="partialPaymentSection" class="hidden" style="background: rgba(196,168,224,0.10); padding: 10px; border-radius: 8px; margin-top: 10px;">
                         <div style="margin-bottom: 10px;">
                             <label class="text-muted" style="font-size: 0.8rem; display: block; margin-bottom: 5px;">💵 Cash Amount</label>
                             <input type="number" id="partialCashAmount" class="input" placeholder="₹0" style="margin:0; text-align: right;" oninput="calculatePartialPayment()">
@@ -855,23 +855,23 @@ async function trackUserActivity(phone) {
                             <label class="text-muted" style="font-size: 0.8rem; display: block; margin-bottom: 5px;">📱 Online Amount</label>
                             <input type="number" id="partialOnlineAmount" class="input" placeholder="₹0" style="margin:0; text-align: right;" oninput="calculatePartialPayment()">
                         </div>
-                        <div class="text-muted" style="font-size: 0.75rem; margin-top: 8px; padding-top: 8px; border-top: 1px dashed rgba(255,255,255,0.2);">
+                        <div class="text-muted" style="font-size: 0.75rem; margin-top: 8px; padding-top: 8px; border-top: 1px dashed rgba(196,168,224,0.28);">
                             <span>Total Entered: </span><span id="partialTotal" style="font-weight: bold; color: var(--primary);">₹0</span>
                         </div>
                     </div>
                 </div>
 
-                <div class="flex justify-between" style="margin-bottom: 20px; font-size: 1.3rem; font-weight: bold; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+                <div class="flex justify-between" style="margin-bottom: 20px; font-size: 1.3rem; font-weight: bold; border-top: 1px solid rgba(196,168,224,0.16); padding-top: 15px;">
                     <span>Net Payable:</span>
                     <span id="payNetTotal" style="color: var(--success);">₹0</span>
                 </div>
 
-                <div id="cashCalcSection" style="margin-bottom: 20px; padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
+                <div id="cashCalcSection" style="margin-bottom: 20px; padding: 10px; background: rgba(196, 168, 224, 0.10); border-radius: 8px; border: 1px solid rgba(196, 168, 224, 0.16);">
                     <div class="flex justify-between items-center" style="margin-bottom: 8px;">
                         <span class="text-muted">💵 Customer Gave:</span>
                         <input type="number" id="cashGiven" class="input" placeholder="₹" style="width: 120px; margin:0; text-align: right; font-size: 1.1rem; font-weight: bold;" oninput="calculateChange()">
                     </div>
-                    <div class="flex justify-between items-center" style="font-size: 1.1rem; font-weight: bold; border-top: 1px dashed rgba(255,255,255,0.2); padding-top: 8px;">
+                    <div class="flex justify-between items-center" style="font-size: 1.1rem; font-weight: bold; border-top: 1px dashed rgba(196,168,224,0.28); padding-top: 8px;">
                         <span>🔄 Return Change:</span>
                         <span id="cashReturn" style="color: var(--warning);">₹0</span>
                     </div>
@@ -1429,7 +1429,7 @@ async function loadCoupons() {
             : `₹${coupon.value} OFF`;
         
         html += `
-            <div class="card" style="background:rgba(255,255,255,0.05); margin-bottom:10px;">
+            <div class="card" style="background:rgba(196,168,224,0.10); margin-bottom:10px;">
                 <div class="flex justify-between items-center" style="margin-bottom:8px;">
                     <div>
                         <strong style="font-size:1.1rem; color:var(--primary);">${coupon.code}</strong>
@@ -1869,7 +1869,7 @@ function renderItemAnalytics(itemMap) {
         topListEl.innerHTML = '<p class="text-muted">No items sold in this period.</p>';
     } else {
         topListEl.innerHTML = sortedItems.slice(0, 5).map((item, index) => `
-            <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.05); padding:5px 0;">
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(196,168,224,0.10); padding:5px 0;">
                 <span>${index+1}. ${item.name}</span>
                 <span class="text-muted">${item.qty} sold</span>
             </div>
@@ -1882,7 +1882,7 @@ function renderItemAnalytics(itemMap) {
         tableBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted" style="padding:20px;">No data</td></tr>';
     } else {
         tableBody.innerHTML = sortedItems.map(item => `
-            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+            <tr style="border-bottom: 1px solid rgba(196,168,224,0.10);">
                 <td style="padding: 10px;">${item.name}</td>
                 <td style="padding: 10px; text-align: center;">${item.qty}</td>
                 <td style="padding: 10px; text-align: right;">₹${item.revenue}</td>
@@ -1940,7 +1940,7 @@ function renderSalesChart(dailyData) {
             scales: {
                 y: {
                     beginAtZero: true,
-                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                    grid: { color: 'rgba(196, 168, 224, 0.10)' },
                     ticks: { color: '#888' }
                 },
                 x: {
@@ -2087,7 +2087,7 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
                     ? `${data.discount.value}% OFF` 
                     : `₹${data.discount.value} OFF`;
                 discountHtml = `
-                    <div style="background:rgba(76,175,80,0.1); padding:8px; border-radius:6px; margin-top:8px; border:1px solid rgba(76,175,80,0.3);">
+                    <div style="background:rgba(52,211,153,0.13); padding:8px; border-radius:6px; margin-top:8px; border:1px solid rgba(52,211,153,0.35);">
                         <div style="font-size:0.85rem; color:var(--success); font-weight:600;">
                             🎫 Coupon Applied: ${data.discount.code}
                         </div>
@@ -2283,7 +2283,7 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
 function renderEditItems() {
     const container = document.getElementById('editItemsList');
     container.innerHTML = TEMP_EDIT_ITEMS.map((item, index) => `
-        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.05); padding:8px; border-radius:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(196,168,224,0.10); padding:8px; border-radius:6px;">
             <div style="flex:1;">
                 <div style="font-size:0.9rem;">${item.name}</div>
                 <div class="text-muted" style="font-size:0.75rem;">₹${item.price} each</div>
@@ -2561,7 +2561,7 @@ function filterMenu(text) {
                         : '';
                     
                     // Highlight if selected
-                    const selectedStyle = qty > 0 ? 'border-color: var(--primary); background: rgba(245, 230, 66, 0.15);' : '';
+                    const selectedStyle = qty > 0 ? 'border-color: var(--primary); background: rgba(245, 230, 66, 0.16);' : '';
 
                     return `
                     <div class="menu-item" onclick="addToCart('${item.id}')" style="${selectedStyle}">
@@ -2893,7 +2893,7 @@ const customerDisplay = o.customerName
                     
                     <div style="margin-bottom:8px;">${customerDisplay}</div>
                     
-                    <div class="text-muted" style="font-size:0.9rem; border-top:1px solid rgba(255,255,255,0.1); padding-top:8px;">
+                    <div class="text-muted" style="font-size:0.9rem; border-top:1px solid rgba(196,168,224,0.16); padding-top:8px;">
                         ${o.items.map(i => `${i.qty}x ${i.name}`).join(', ')}
                     </div>
                     
@@ -2945,7 +2945,7 @@ const customerDisplay = o.customerName
                         </div>
                     </div>
                     
-                    <div class="text-muted" style="font-size:0.9rem; border-top:1px solid rgba(255,255,255,0.1); padding-top:8px; margin-top:5px;">
+                    <div class="text-muted" style="font-size:0.9rem; border-top:1px solid rgba(196,168,224,0.16); padding-top:8px; margin-top:5px;">
                         ${o.items.map(i => `${i.qty}x ${i.name}`).join(', ')}
                     </div>
                     
@@ -3036,7 +3036,7 @@ function printKOT(orderId) {
                         </div>
                     </div>
                     
-                    <div class="text-muted" style="font-size:0.9rem; border-top:1px solid rgba(255,255,255,0.1); padding-top:8px; margin-top:8px;">
+                    <div class="text-muted" style="font-size:0.9rem; border-top:1px solid rgba(196,168,224,0.16); padding-top:8px; margin-top:8px;">
                         ${o.items.map(i => `${i.qty}x ${i.name}`).join(', ')}
                     </div>
 
@@ -3636,7 +3636,7 @@ function filterCustomerMenu(text) {
             
             // Badge & Styling
             const qtyBadge = qty > 0 ? `<div style="position:absolute; top:8px; right:8px; background:white; color:var(--primary); width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.3); font-size:0.8rem;">${qty}</div>` : '';
-            const borderStyle = qty > 0 ? 'border: 1px solid var(--primary); background: rgba(245, 230, 66, 0.1);' : '';
+            const borderStyle = qty > 0 ? 'border: 1px solid var(--primary); background: rgba(245, 230, 66, 0.14);' : '';
 
             return `
             <div class="menu-item" onclick="addToCart('${item.id}')" style="position:relative; ${borderStyle}">
@@ -3688,7 +3688,7 @@ function filterCustomerMenu(text) {
                                 </div>
                                 <div style="font-weight:bold; font-size:1.1rem;">₹${o.total}</div>
                             </div>
-                            <div class="text-muted" style="font-size:0.85rem; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px;">
+                            <div class="text-muted" style="font-size:0.85rem; border-top:1px solid rgba(196,168,224,0.10); padding-top:8px;">
                                 ${o.items.map(i => `${i.qty} x ${i.name}`).join(', ')}
                             </div>
                         </div>
@@ -4148,7 +4148,7 @@ function loadCustomerNotifications() {
             if(time > lastCheck) hasNew = true;
 
             return `
-            <div style="background:rgba(255,255,255,0.05); border-radius:10px; padding:15px; margin-bottom:15px; border:1px solid rgba(255,255,255,0.1);">
+            <div style="background:rgba(196,168,224,0.10); border-radius:10px; padding:15px; margin-bottom:15px; border:1px solid rgba(196,168,224,0.16);">
                 ${c.image ? `<img src="${c.image}" style="width:100%; max-height:200px; object-fit:cover; border-radius:8px; margin-bottom:10px;">` : ''}
                 <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:5px;">
                     <h4 style="color:var(--primary); margin:0;">${c.title}</h4>
@@ -4210,14 +4210,14 @@ function loadAdminNotificationHistory() {
             const count = data.deliveryCount !== undefined ? data.deliveryCount : '...';
 
             return `
-            <div class="card" style="padding:10px; border:1px solid rgba(255,255,255,0.1); margin-bottom:10px;">
+            <div class="card" style="padding:10px; border:1px solid rgba(196,168,224,0.16); margin-bottom:10px;">
                 <div class="flex justify-between">
                     <strong>${data.title}</strong>
                     <span class="text-muted" style="font-size:0.8rem;">${dateStr}</span>
                 </div>
                 <div class="text-muted" style="font-size:0.9rem; margin:5px 0;">${data.message}</div>
                 
-                <div class="flex justify-between items-center" style="margin-top:10px; border-top:1px solid rgba(255,255,255,0.1); padding-top:8px;">
+                <div class="flex justify-between items-center" style="margin-top:10px; border-top:1px solid rgba(196,168,224,0.16); padding-top:8px;">
                     <span style="color:var(--success); font-weight:bold;">
                         📱 Delivered to: ${count} devices
                     </span>
@@ -4330,7 +4330,7 @@ async function loadAdminIngredients() {
         const blocked = ing.blockedStock || 0;
         const available = (ing.stock || 0) - blocked;
         return `
-        <div class="card" style="background:rgba(255,255,255,0.05); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+        <div class="card" style="background:rgba(196,168,224,0.10); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
             <div>
                 <div style="font-weight:bold; font-size:1rem;">${ing.name}</div>
                 <div style="font-size:0.8rem; color:var(--text-muted);">
@@ -4441,7 +4441,7 @@ async function loadItemRecipe(itemId) {
             if (ingDoc.exists()) ingName = ingDoc.data().name;
         } catch(e) {}
         html += `
-        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.05); padding:8px; border-radius:6px; margin-bottom:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(196,168,224,0.10); padding:8px; border-radius:6px; margin-bottom:6px;">
             <span style="font-size:0.9rem;">${ingName}</span>
             <div style="display:flex; align-items:center; gap:8px;">
                 <span style="color:var(--primary); font-weight:bold;">${r.qty} ${r.unit}</span>
@@ -4499,7 +4499,7 @@ async function loadStockView() {
             const available = (ing.stock || 0) - blocked;
             const stockColor = available < 5 ? 'var(--danger)' : available < 20 ? 'var(--warning)' : 'var(--success)';
             return `
-            <div class="card" style="background:rgba(255,255,255,0.05); margin-bottom:10px;">
+            <div class="card" style="background:rgba(196,168,224,0.10); margin-bottom:10px;">
                 <div class="flex justify-between items-center" style="margin-bottom:8px;">
                     <div>
                         <div style="font-weight:bold;">${ing.name}</div>
@@ -4567,7 +4567,7 @@ async function loadActiveUsersReport() {
 <div id="orderDetailsModal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 500; display: flex; align-items: center; justify-content: center;">
     <div class="card" style="width: 90%; max-width: 400px; max-height: 90vh; overflow-y: auto;">
         
-        <div class="flex justify-between items-center" style="margin-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px;">
+        <div class="flex justify-between items-center" style="margin-bottom: 15px; border-bottom: 1px solid rgba(196,168,224,0.16); padding-bottom: 10px;">
             <h3>Order Details</h3>
             <button class="btn btn-secondary btn-sm" onclick="closeDetailsModal()">✖</button>
         </div>
@@ -4579,15 +4579,15 @@ async function loadActiveUsersReport() {
                 <p class="text-muted" style="font-size:0.8rem;" id="viewDate">...</p>
             </div>
 
-            <div style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px; margin-bottom: 10px;">
+            <div style="background: rgba(196,168,224,0.10); padding: 10px; border-radius: 8px; margin-bottom: 10px;">
                 <label class="text-muted" style="font-size:0.75rem;">Customer</label>
                 <input id="editCustName" class="input" style="margin-bottom:5px;" disabled>
                 <input id="editCustPhone" class="input" style="margin-bottom:0;" disabled>
             </div>
 
-            <div id="viewItemsList" style="border-top: 1px dashed rgba(255,255,255,0.2); border-bottom: 1px dashed rgba(255,255,255,0.2); padding: 10px 0; margin-bottom: 10px;"></div>
+            <div id="viewItemsList" style="border-top: 1px dashed rgba(196,168,224,0.28); border-bottom: 1px dashed rgba(196,168,224,0.28); padding: 10px 0; margin-bottom: 10px;"></div>
 
-<div id="editItemsWrapper" class="hidden" style="margin-bottom: 15px; border-top: 1px dashed rgba(255,255,255,0.2); padding-top: 10px;">
+<div id="editItemsWrapper" class="hidden" style="margin-bottom: 15px; border-top: 1px dashed rgba(196,168,224,0.28); padding-top: 10px;">
     <div id="editItemsList" style="display:flex; flex-direction:column; gap:8px;"></div>
     
     <div style="margin-top: 10px; display:flex; gap:5px;">
@@ -4597,9 +4597,9 @@ async function loadActiveUsersReport() {
     </div>
     
     <!-- Coupon Section for Editing -->
-    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed rgba(255,255,255,0.2);">
+    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed rgba(196,168,224,0.28);">
         <label class="text-muted" style="font-size:0.75rem; margin-bottom:6px; display:block;">🎫 Discount Coupon</label>
-        <div id="editAppliedCoupon" class="hidden" style="background:rgba(76,175,80,0.1); padding:8px; border-radius:6px; margin-bottom:8px; border:1px solid rgba(76,175,80,0.3);">
+        <div id="editAppliedCoupon" class="hidden" style="background:rgba(52,211,153,0.13); padding:8px; border-radius:6px; margin-bottom:8px; border:1px solid rgba(52,211,153,0.35);">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-size:0.85rem; color:var(--success); font-weight:600;" id="editCouponCodeLabel">SAVE50</span>
                 <button class="btn btn-sm btn-danger" onclick="removeEditCoupon()" style="padding:4px 8px; font-size:0.75rem;">Remove</button>
@@ -4643,7 +4643,7 @@ async function loadActiveUsersReport() {
 
 <div id="notificationModal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 600; display: flex; align-items: center; justify-content: center;">
     <div class="card" style="width: 90%; max-width: 400px; max-height: 80vh; display:flex; flex-direction:column;">
-        <div class="flex justify-between items-center" style="margin-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px;">
+        <div class="flex justify-between items-center" style="margin-bottom: 15px; border-bottom: 1px solid rgba(196,168,224,0.16); padding-bottom: 10px;">
             <h3>📢 Offers & Updates</h3>
             <button class="btn btn-secondary btn-sm" onclick="document.getElementById('notificationModal').classList.add('hidden')">✖</button>
         </div>
