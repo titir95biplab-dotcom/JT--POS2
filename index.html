@@ -189,7 +189,9 @@ async function trackUserActivity(phone) {
         }
         
         .menu-item:active { transform: scale(0.96); }
-        .menu-item:hover { border-color: var(--primary); background: rgba(0,212,255,0.08); box-shadow: 0 0 12px rgba(0,212,255,0.25); }
+        .menu-item:hover { border-color: var(--primary); background: rgba(15,39,68,0.98); box-shadow: 0 0 0 1px var(--primary), 0 0 16px rgba(0,212,255,0.30); }
+        .menu-item:hover .item-name-clamp { color: #FFFFFF; }
+        .menu-item:hover .item-price-tag { color: #FFD060; } /* switch to gold on hover so it pops against dark bg */
 
         /* Item Name Limit (prevents overflow) */
         .item-name-clamp {
@@ -218,8 +220,8 @@ async function trackUserActivity(phone) {
         .cart-panel { background: var(--surface); border-radius: 12px; padding: 15px; display: flex; flex-direction: column; height: 100%; }
         .cart-items { flex: 1; overflow-y: auto; margin: 10px 0; }
         .cart-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(15,39,68,0.90); }
-        .qty-controls { display: flex; align-items: center; gap: 8px; background: rgba(0,212,255,0.15); border-radius: 4px; padding: 2px; }
-        .qty-btn { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-weight: bold; }
+        .qty-controls { display: flex; align-items: center; gap: 8px; background: rgba(15,39,68,0.95); border: 1px solid rgba(0,212,255,0.3); border-radius: 4px; padding: 2px; }
+        .qty-btn { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-weight: bold; color: #00D4FF; }
 
         /* Tabs */
         .tabs { display: flex; gap: 10px; margin-bottom: 15px; overflow-x: auto; padding-bottom: 5px; }
@@ -2561,7 +2563,7 @@ function filterMenu(text) {
                         : '';
                     
                     // Highlight if selected
-                    const selectedStyle = qty > 0 ? 'border-color: var(--primary); background: rgba(0, 212, 255, 0.12);' : '';
+                    const selectedStyle = qty > 0 ? 'border-color: var(--primary); background: rgba(15,39,68,0.98); box-shadow: 0 0 0 1px var(--primary);' : '';
 
                     return `
                     <div class="menu-item" onclick="addToCart('${item.id}')" style="${selectedStyle}">
@@ -3636,7 +3638,7 @@ function filterCustomerMenu(text) {
             
             // Badge & Styling
             const qtyBadge = qty > 0 ? `<div style="position:absolute; top:8px; right:8px; background:white; color:var(--primary); width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.3); font-size:0.8rem;">${qty}</div>` : '';
-            const borderStyle = qty > 0 ? 'border: 1px solid var(--primary); background: rgba(0, 212, 255, 0.10);' : '';
+            const borderStyle = qty > 0 ? 'border: 1px solid var(--primary); background: rgba(15,39,68,0.98); box-shadow: 0 0 0 1px var(--primary);' : '';
 
             return `
             <div class="menu-item" onclick="addToCart('${item.id}')" style="position:relative; ${borderStyle}">
