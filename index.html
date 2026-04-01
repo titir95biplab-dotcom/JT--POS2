@@ -2104,8 +2104,23 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
                     </div>
                 `;
             }
+
+            // KOT Status display
+            const kotStatus = data.kotStatus || null;
+            let kotHtml = '';
+            if(kotStatus === 'preparing') {
+                kotHtml = `<div style="background:rgba(255,149,0,0.15); border:1px solid rgba(255,149,0,0.4); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:#FF9500; font-weight:600;">🔥 Kitchen Status: PREPARING</div>`;
+            } else if(kotStatus === 'completed') {
+                kotHtml = `<div style="background:rgba(0,229,160,0.12); border:1px solid rgba(0,229,160,0.4); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:var(--success); font-weight:600;">✅ Kitchen Status: READY</div>`;
+            } else if(data.status === 'pending' || data.status === 'requested') {
+                kotHtml = `<div style="background:rgba(107,140,174,0.1); border:1px solid rgba(107,140,174,0.3); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:var(--text-muted);">⏳ Kitchen Status: QUEUED</div>`;
+            }
+
+            // Source badge
+            const srcLabel = data.orderSource === 'customer' ? '📱 Customer App Order' : '🖥️ POS / Outlet Order';
+            const srcHtml = `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">${srcLabel}</div>`;
             
-            document.getElementById('viewItemsList').innerHTML = itemsHtml + discountHtml;
+            document.getElementById('viewItemsList').innerHTML = itemsHtml + discountHtml + kotHtml + srcHtml;
 
             // Populate Payment
             document.getElementById('editTotal').value = data.finalPaid || data.total;
@@ -2130,6 +2145,21 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
 
         // --- ADMIN EDIT LOGIC ---
         function enableAdminEdit() {
+            // Check if kitchen has locked this order
+            const { doc, getDoc } = window.firebaseModules;
+            getDoc(doc(window.db, 'orders', CURRENT_VIEW_ORDER_ID)).then(snap => {
+                if(snap.exists()) {
+                    const kotSt = snap.data().kotStatus;
+                    if(kotSt === 'preparing' || kotSt === 'completed') {
+                        return showToast('❌ Cannot edit — Kitchen is already preparing this order', 'error');
+                    }
+                }
+                // Proceed with edit
+            _doEnableAdminEdit();
+            });
+        }
+
+        function _doEnableAdminEdit() {
             // Enable Inputs
             document.getElementById('editCustName').disabled = false;
             document.getElementById('editCustPhone').disabled = false;
@@ -2709,7 +2739,7 @@ function filterMenu(text) {
             if(STATE.custCart.length === 0) return showToast('Cart is empty', 'error');
             isSubmitting = true;
             try {
-                await submitOrder(STATE.user.phone, STATE.custCart, 'requested');
+                await submitOrder(STATE.user.phone, STATE.custCart, 'requested', 'customer');
                 STATE.custCart = [];
                 renderActiveCart();
                 showToast('Order Request Sent');
@@ -2719,7 +2749,7 @@ function filterMenu(text) {
             }
         }
 
-        async function submitOrder(phone, items, status) {
+        async function submitOrder(phone, items, status, source='pos') {
             const { addDoc, collection, serverTimestamp, doc, setDoc, getDoc } = window.firebaseModules;
             
             // IMPORTANT: Deep-copy items immediately so clearing the cart later
@@ -2764,7 +2794,9 @@ function filterMenu(text) {
                 total: finalTotal,
                 status: status, 
                 timestamp: serverTimestamp(),
-                stockBlocked: true
+                stockBlocked: true,
+                kotStatus: null,        // KOT status: null | 'preparing' | 'completed'
+                orderSource: source     // 'pos' | 'customer'
             });
 
             // 3. Block ingredient stock for this order
@@ -2853,11 +2885,19 @@ async function searchHistory() {
             if(o.status === 'cancelled') statusColor = '#FF4D6D';
             if(o.status === 'pending') statusColor = '#FFD060';
 
+            // KOT badge
+            let kotBadge = '';
+            if(o.kotStatus === 'preparing') kotBadge = `<span style="background:#FF9500; color:#000; padding:1px 6px; border-radius:3px; font-size:0.65rem; font-weight:bold; margin-left:4px;">🔥 PREP</span>`;
+            else if(o.kotStatus === 'completed') kotBadge = `<span style="background:#00E5A0; color:#000; padding:1px 6px; border-radius:3px; font-size:0.65rem; font-weight:bold; margin-left:4px;">✅ READY</span>`;
+
+            // Source
+            const srcLabel = o.orderSource === 'customer' ? '📱' : '🖥️';
+
             return `
             <div class="order-card" onclick="viewOrderDetails('${o.id}')" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
                 <div>
-                    <div style="font-weight:bold; font-size:1.1rem;">${o.customerName || o.phone}</div>
-                    <div class="text-muted" style="font-size:0.85rem;">${dateStr} • <span style="color:${statusColor}">${o.status.toUpperCase()}</span></div>
+                    <div style="font-weight:bold; font-size:1.1rem;">${srcLabel} ${o.customerName || o.phone}</div>
+                    <div class="text-muted" style="font-size:0.85rem;">${dateStr} • <span style="color:${statusColor}">${o.status.toUpperCase()}</span>${kotBadge}</div>
                     <div class="text-muted" style="font-size:0.8rem;">₹${o.total} • ${o.paymentMode || 'Cash'}</div>
                 </div>
                 <div style="text-align:right;">
@@ -2932,14 +2972,43 @@ const customerDisplay = o.customerName
                 const hasDiscount = o.discount && o.discount.amount > 0;
                 const discountBadge = hasDiscount ? `<span class="discount-badge">🎫 ${o.discount.code}</span>` : '';
 
+                // KOT Status Badge
+                const kotStatus = o.kotStatus || null;
+                let kotBadgeHtml = '';
+                let kotBadgeColor = '';
+                if(kotStatus === 'preparing') {
+                    kotBadgeColor = '#FF9500';
+                    kotBadgeHtml = `<span style="background:${kotBadgeColor}; color:#000; padding:2px 8px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">🔥 KITCHEN: PREPARING</span>`;
+                } else if(kotStatus === 'completed') {
+                    kotBadgeColor = '#00E5A0';
+                    kotBadgeHtml = `<span style="background:${kotBadgeColor}; color:#000; padding:2px 8px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">✅ KITCHEN: READY</span>`;
+                } else {
+                    kotBadgeHtml = `<span style="background:rgba(107,140,174,0.3); color:#aaa; padding:2px 8px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">⏳ KITCHEN: QUEUED</span>`;
+                }
+
+                // Source badge
+                const sourceBadge = o.orderSource === 'customer' 
+                    ? `<span style="background:rgba(123,140,222,0.3); color:#7B8CDE; padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">📱 CUSTOMER</span>`
+                    : `<span style="background:rgba(0,212,255,0.15); color:var(--primary); padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">🖥️ POS</span>`;
+
+                // Disable edit if kitchen started
+                const canEdit = !kotStatus || kotStatus === null;
+                const editBtn = canEdit 
+                    ? `<button class="btn btn-secondary w-full" onclick="editOrder('${o.id}')">✏️ Edit</button>`
+                    : `<button class="btn btn-secondary w-full" disabled style="opacity:0.4; cursor:not-allowed;" title="Locked — Kitchen is preparing">🔒 Locked</button>`;
+
                 return `
                 <div class="order-card ${hasDiscount ? 'discount-applied' : ''}" style="position:relative;">
                     ${discountBadge}
                     <div class="flex justify-between" style="align-items:flex-start; margin-bottom:8px;">
                         <div>
                             <div style="margin-bottom:5px;">${customerDisplay}</div>
-                            <span class="order-status status-pending" style="font-size:0.65rem;">PENDING</span>
-                            <span class="text-muted" style="font-size:0.75rem; margin-left:5px;">📅 ${timeStr}</span>
+                            <div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">
+                                <span class="order-status status-pending" style="font-size:0.65rem;">PENDING</span>
+                                ${sourceBadge}
+                                <span class="text-muted" style="font-size:0.75rem; margin-left:5px;">📅 ${timeStr}</span>
+                            </div>
+                            <div style="margin-top:4px;">${kotBadgeHtml}</div>
                         </div>
                         <div style="text-align:right;">
                             <strong style="font-size:1.2rem; display:block;">₹${o.total}</strong>
@@ -2954,7 +3023,7 @@ const customerDisplay = o.customerName
                     <div class="flex gap-2" style="margin-top:12px;">
     <button class="btn btn-secondary" style="background:#444;" onclick="printKOTDirect('${o.id}')">🖨️ KOT</button>
     
-    <button class="btn btn-secondary w-full" onclick="editOrder('${o.id}')">✏️ Edit</button>
+    ${editBtn}
     <button class="btn btn-success w-full" onclick="openPaymentModal('${o.id}', ${o.total}, '${o.phone}')">✅ Bill</button>
 </div>
                 </div>
@@ -3104,6 +3173,10 @@ function printKOT(orderId) {
             getDoc(doc(window.db, 'orders', orderId)).then(snap => {
                 if(snap.exists()) {
                     const data = snap.data();
+                    // Block editing if kitchen has started or finished preparation
+                    if(data.kotStatus === 'preparing' || data.kotStatus === 'completed') {
+                        return showToast('❌ Cannot edit — Kitchen is already preparing this order', 'error');
+                    }
                     STATE.cart = data.items;
                     STATE.editingOrderId = orderId;
                     
