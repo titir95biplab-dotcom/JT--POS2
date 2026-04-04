@@ -992,6 +992,7 @@ async function trackUserActivity(phone) {
             custCart: [], 
             orders: [],
             editingOrderId: null,
+            kitchenLockedItems: [], // items locked by kitchen (cannot reduce/remove)
             activeCategory: 'All',
 	    adminActiveCategory: 'All',
             tempPhone: null,
@@ -2185,17 +2186,27 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
 
         // --- ADMIN EDIT LOGIC ---
         function enableAdminEdit() {
-            // Check if kitchen has locked this order
+            // Check kitchen status before enabling edit
             const { doc, getDoc } = window.firebaseModules;
             getDoc(doc(window.db, 'orders', CURRENT_VIEW_ORDER_ID)).then(snap => {
                 if(snap.exists()) {
-                    const kotSt = snap.data().kotStatus;
-                    if(kotSt === 'preparing' || kotSt === 'completed') {
-                        return showToast('❌ Cannot edit — Kitchen is already preparing this order', 'error');
+                    const orderData = snap.data();
+                    const kotSt = orderData.kotStatus;
+
+                    if(kotSt === 'completed') {
+                        // Kitchen fully done — no editing at all
+                        return showToast('❌ Cannot edit — Kitchen has already completed this order', 'error');
+                    }
+
+                    if(kotSt === 'preparing') {
+                        // Add-only mode: store original items as locked floor
+                        ADMIN_KITCHEN_LOCKED_ITEMS = JSON.parse(JSON.stringify(orderData.items));
+                        showToast('⚠️ Kitchen is preparing — you can only ADD items or increase qty', 'warning');
+                    } else {
+                        ADMIN_KITCHEN_LOCKED_ITEMS = [];
                     }
                 }
-                // Proceed with edit
-            _doEnableAdminEdit();
+                _doEnableAdminEdit();
             });
         }
 
@@ -2209,6 +2220,18 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
 // NEW: Toggle Item Views
     document.getElementById('viewItemsList').classList.add('hidden'); // Hide static
     document.getElementById('editItemsWrapper').classList.remove('hidden'); // Show dynamic
+
+    // Show kitchen lock banner if in add-only mode
+    const wrapper = document.getElementById('editItemsWrapper');
+    const existingBanner = document.getElementById('kitchenLockBanner');
+    if(existingBanner) existingBanner.remove();
+    if(ADMIN_KITCHEN_LOCKED_ITEMS.length > 0) {
+        const banner = document.createElement('div');
+        banner.id = 'kitchenLockBanner';
+        banner.style.cssText = 'background:rgba(255,149,0,0.15); border:1px solid rgba(255,149,0,0.4); border-radius:8px; padding:8px 12px; margin-bottom:10px; font-size:0.82rem; color:#FF9500; font-weight:600;';
+        banner.innerHTML = '🔥 Kitchen is preparing — existing items are locked. You can only <strong>add new items</strong> or <strong>increase quantities</strong>.';
+        wrapper.prepend(banner);
+    }
     
     renderEditItems(); // Draw the editable list
     
@@ -2234,10 +2257,14 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             document.getElementById('editCustPhone').disabled = true;
             document.getElementById('editTotal').disabled = true;
             document.getElementById('editMode').disabled = true;
+            ADMIN_KITCHEN_LOCKED_ITEMS = []; // clear lock state
             
 // NEW: Toggle Item Views Back
     document.getElementById('viewItemsList').classList.remove('hidden');
     document.getElementById('editItemsWrapper').classList.add('hidden');
+    // Remove kitchen lock banner if present
+    const bannerEl = document.getElementById('kitchenLockBanner');
+    if(bannerEl) bannerEl.remove();
             document.getElementById('btnAdminEdit').classList.remove('hidden');
             document.getElementById('btnAdminSave').classList.add('hidden');
         }
@@ -2352,37 +2379,65 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
 }
 
 // 1. Render the editable list with Qty inputs and Delete buttons
+// Stores original (kitchen-locked) items when admin opens a preparing order
+let ADMIN_KITCHEN_LOCKED_ITEMS = [];
+
 function renderEditItems() {
     const container = document.getElementById('editItemsList');
-    container.innerHTML = TEMP_EDIT_ITEMS.map((item, index) => `
-        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(15,39,68,0.90); padding:8px; border-radius:6px;">
+    container.innerHTML = TEMP_EDIT_ITEMS.map((item, index) => {
+        // Check if this item is kitchen-locked
+        const locked = ADMIN_KITCHEN_LOCKED_ITEMS.find(l => l.id === item.id);
+        const minQty  = locked ? locked.qty : 1;
+        const isLocked = !!locked;
+
+        const lockBadge = isLocked
+            ? `<span style="font-size:0.65rem; background:rgba(255,149,0,0.2); color:#FF9500; padding:1px 6px; border-radius:4px; font-weight:700; margin-left:4px;">🔥 KITCHEN</span>`
+            : '';
+
+        // Delete button: hidden for locked items
+        const deleteBtn = isLocked
+            ? `<button class="btn btn-danger btn-sm" disabled style="opacity:0.25; cursor:not-allowed;" title="Cannot remove — kitchen is preparing">🗑️</button>`
+            : `<button class="btn btn-danger btn-sm" onclick="adminRemoveItem(${index})">🗑️</button>`;
+
+        return `
+        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(15,39,68,0.90); padding:8px; border-radius:6px; ${isLocked ? 'border:1px solid rgba(255,149,0,0.3);' : ''}">
             <div style="flex:1;">
-                <div style="font-size:0.9rem;">${item.name}</div>
-                <div class="text-muted" style="font-size:0.75rem;">₹${item.price} each</div>
+                <div style="font-size:0.9rem;">${item.name}${lockBadge}</div>
+                <div class="text-muted" style="font-size:0.75rem;">₹${item.price} each${isLocked ? ' · min qty: ' + minQty : ''}</div>
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
-                <input type="number" value="${item.qty}" min="1" 
+                <input type="number" value="${item.qty}" min="${minQty}"
                     style="width:50px; padding:4px; border-radius:4px; border:none;"
-                    onchange="adminUpdateItemQty(${index}, this.value)">
-                <button class="btn btn-danger btn-sm" onclick="adminRemoveItem(${index})">🗑️</button>
+                    onchange="adminUpdateItemQty(${index}, this.value, ${minQty})">
+                ${deleteBtn}
             </div>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
     
-    recalcEditTotal(); // Auto-update the total price
+    recalcEditTotal();
 }
 
-// 2. Update Quantity
-function adminUpdateItemQty(index, newQty) {
-    const qty = parseInt(newQty);
-    if (qty > 0) {
-        TEMP_EDIT_ITEMS[index].qty = qty;
-        recalcEditTotal();
+// 2. Update Quantity — respect minimum locked qty
+function adminUpdateItemQty(index, newQty, minQty = 1) {
+    let qty = parseInt(newQty);
+    if (isNaN(qty) || qty < minQty) {
+        qty = minQty;
+        // Reset the input visually
+        const inputs = document.querySelectorAll('#editItemsList input[type=number]');
+        if (inputs[index]) inputs[index].value = qty;
+        if (minQty > 1) showToast('🔒 Cannot reduce below kitchen quantity (' + minQty + ')', 'error');
     }
+    TEMP_EDIT_ITEMS[index].qty = qty;
+    recalcEditTotal();
 }
 
-// 3. Remove Item
+// 3. Remove Item — block if kitchen-locked
 function adminRemoveItem(index) {
+    const item = TEMP_EDIT_ITEMS[index];
+    const locked = ADMIN_KITCHEN_LOCKED_ITEMS.find(l => l.id === item.id);
+    if (locked) {
+        return showToast('🔒 Cannot remove — kitchen is preparing this item', 'error');
+    }
     TEMP_EDIT_ITEMS.splice(index, 1);
     renderEditItems();
 }
@@ -2670,6 +2725,18 @@ function filterMenu(text) {
             const targetCart = STATE.role === 'customer' ? STATE.custCart : STATE.cart;
             const item = targetCart.find(c => c.id === itemId);
             if(!item) return;
+
+            // If reducing/removing, check if item is kitchen-locked
+            if(delta < 0 && STATE.role !== 'customer') {
+                const locked = STATE.kitchenLockedItems.find(l => l.id === itemId);
+                if(locked) {
+                    // Cannot go below the locked (original) quantity
+                    if(item.qty <= locked.qty) {
+                        return showToast('🔒 Cannot reduce — Kitchen is already preparing this item', 'error');
+                    }
+                }
+            }
+
             item.qty += delta;
             if(item.qty <= 0) {
                 if(STATE.role === 'customer') STATE.custCart = STATE.custCart.filter(c => c.id !== itemId);
@@ -2681,6 +2748,7 @@ function filterMenu(text) {
         function clearCart() {
             STATE.cart = [];
             STATE.editingOrderId = null;
+            STATE.kitchenLockedItems = [];
             document.getElementById('posPhone').value = '';
             document.getElementById('btnPlaceOrder').classList.remove('hidden');
             document.getElementById('btnUpdateOrder').classList.add('hidden');
@@ -2714,14 +2782,31 @@ function filterMenu(text) {
             let total = 0;
             container.innerHTML = cartArray.map(item => {
                 total += item.price * item.qty;
+
+                // Check if this item is kitchen-locked (outlet/POS only)
+                const lockedItem = (STATE.role !== 'customer')
+                    ? STATE.kitchenLockedItems.find(l => l.id === item.id)
+                    : null;
+                const isAtLockFloor = lockedItem && item.qty <= lockedItem.qty;
+
+                // Minus button: disabled if at or below locked qty
+                const minusBtn = isAtLockFloor
+                    ? `<div class="qty-btn" style="opacity:0.3; cursor:not-allowed;" title="🔒 Kitchen is preparing this item">-</div>`
+                    : `<div class="qty-btn" onclick="updateQty('${item.id}', -1)">-</div>`;
+
+                // Lock badge next to name
+                const lockBadge = lockedItem
+                    ? `<span style="font-size:0.65rem; background:rgba(255,149,0,0.2); color:#FF9500; padding:1px 5px; border-radius:4px; margin-left:5px; font-weight:700;">🔥 KITCHEN</span>`
+                    : '';
+
                 return `
                     <div class="cart-item">
                         <div>
-                            <div style="font-size: 0.9rem;">${item.name}</div>
+                            <div style="font-size: 0.9rem;">${item.name}${lockBadge}</div>
                             <div class="text-muted" style="font-size: 0.8rem;">₹${item.price} x ${item.qty}</div>
                         </div>
                         <div class="qty-controls">
-                            <div class="qty-btn" onclick="updateQty('${item.id}', -1)">-</div>
+                            ${minusBtn}
                             <span style="padding: 0 5px;">${item.qty}</span>
                             <div class="qty-btn" onclick="updateQty('${item.id}', 1)">+</div>
                         </div>
@@ -3031,11 +3116,18 @@ const customerDisplay = o.customerName
                     ? `<span style="background:rgba(123,140,222,0.3); color:#7B8CDE; padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">📱 CUSTOMER</span>`
                     : `<span style="background:rgba(0,212,255,0.15); color:var(--primary); padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">🖥️ POS</span>`;
 
-                // Disable edit if kitchen started
-                const canEdit = !kotStatus || kotStatus === null;
-                const editBtn = canEdit 
-                    ? `<button class="btn btn-secondary w-full" onclick="editOrder('${o.id}')">✏️ Edit</button>`
-                    : `<button class="btn btn-secondary w-full" disabled style="opacity:0.4; cursor:not-allowed;" title="Locked — Kitchen is preparing">🔒 Locked</button>`;
+                // Edit button logic:
+                // - No kotStatus: full edit allowed
+                // - preparing: add-only mode (show warning label)
+                // - completed: fully locked
+                let editBtn;
+                if(!kotStatus) {
+                    editBtn = `<button class="btn btn-secondary w-full" onclick="editOrder('${o.id}')">✏️ Edit</button>`;
+                } else if(kotStatus === 'preparing') {
+                    editBtn = `<button class="btn btn-warning w-full" onclick="editOrder('${o.id}')" style="font-size:0.8rem;" title="Add items only — cannot remove what kitchen is preparing">➕ Add Items</button>`;
+                } else {
+                    editBtn = `<button class="btn btn-secondary w-full" disabled style="opacity:0.4; cursor:not-allowed;" title="Kitchen has completed this order">🔒 Locked</button>`;
+                }
 
                 return `
                 <div class="order-card ${hasDiscount ? 'discount-applied' : ''}" style="position:relative;">
@@ -3213,11 +3305,19 @@ function printKOT(orderId) {
             getDoc(doc(window.db, 'orders', orderId)).then(snap => {
                 if(snap.exists()) {
                     const data = snap.data();
-                    // Block editing if kitchen has started or finished preparation
-                    if(data.kotStatus === 'preparing' || data.kotStatus === 'completed') {
-                        return showToast('❌ Cannot edit — Kitchen is already preparing this order', 'error');
+                    // If kitchen is fully done (ready), block all editing
+                    if(data.kotStatus === 'completed') {
+                        return showToast('❌ Cannot edit — Kitchen has already completed this order', 'error');
                     }
-                    STATE.cart = data.items;
+                    // If kitchen is preparing: allow add-only mode (lock existing items)
+                    if(data.kotStatus === 'preparing') {
+                        // Store original items as locked — cannot reduce qty or remove
+                        STATE.kitchenLockedItems = JSON.parse(JSON.stringify(data.items));
+                        showToast('⚠️ Kitchen is preparing — you can only ADD items', 'warning');
+                    } else {
+                        STATE.kitchenLockedItems = [];
+                    }
+                    STATE.cart = JSON.parse(JSON.stringify(data.items));
                     STATE.editingOrderId = orderId;
                     
                     // Load discount if exists
