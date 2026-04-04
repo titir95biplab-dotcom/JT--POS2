@@ -312,33 +312,37 @@ async function trackUserActivity(phone) {
     </button>
 
     <!-- iOS Install Instructions Modal -->
-    <div id="iosInstallModal" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,0.88); z-index:99999; display:flex; align-items:flex-end; justify-content:center; padding:20px;">
-        <div style="background:#0D1B2E; border-radius:16px; padding:24px; width:100%; max-width:420px; border:1px solid rgba(0,212,255,0.2); margin-bottom:10px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-                <h3 style="color:var(--primary);">📲 Install This App</h3>
-                <button onclick="hideIOSInstallModal()" style="background:none; border:none; color:#aaa; font-size:1.4rem; cursor:pointer; line-height:1;">&#x2715;</button>
+    <div id="iosInstallModal" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,0.88); z-index:99999; display:flex; align-items:flex-end; justify-content:center; padding:12px;">
+        <div style="background:#0D1B2E; border-radius:20px 20px 16px 16px; padding:20px; width:100%; max-width:440px; border:1px solid rgba(0,212,255,0.25); margin-bottom:8px; animation: slideUp 0.3s ease;">
+            <!-- Arrow pointing down to Safari share bar -->
+            <div style="text-align:center; margin-bottom:4px;">
+                <div style="display:inline-block; background:var(--primary); color:#070D1A; font-size:0.7rem; font-weight:800; padding:3px 12px; border-radius:20px; letter-spacing:1px;">INSTALL THIS APP</div>
             </div>
-            <p style="color:#aaa; font-size:0.9rem; margin-bottom:20px; line-height:1.6;">
-                To install on your iPhone or iPad, follow these steps:
-            </p>
-            <div style="display:flex; flex-direction:column; gap:14px;">
-                <div style="display:flex; align-items:center; gap:14px; background:rgba(0,212,255,0.06); padding:12px; border-radius:10px;">
-                    <span style="font-size:1.8rem; flex-shrink:0;">1&#xFE0F;&#x20E3;</span>
-                    <span style="font-size:0.9rem; color:var(--text);">Tap the <strong style="color:var(--primary);">Share</strong> button at the bottom of Safari <strong style="color:var(--primary);">&#x2B06;&#xFE0F;</strong></span>
+            <div style="text-align:center; font-size:2.2rem; margin: 8px 0 4px;">📲</div>
+            <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:14px;">
+                <div style="display:flex; align-items:center; gap:12px; background:rgba(0,212,255,0.07); padding:11px 14px; border-radius:12px; border:1px solid rgba(0,212,255,0.12);">
+                    <span style="background:var(--primary); color:#070D1A; font-weight:800; font-size:0.8rem; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0;">1</span>
+                    <span style="font-size:0.9rem; color:var(--text);">Tap the <strong style="color:var(--primary);">Share &#x2B06;</strong> icon at the bottom of Safari</span>
                 </div>
-                <div style="display:flex; align-items:center; gap:14px; background:rgba(0,212,255,0.06); padding:12px; border-radius:10px;">
-                    <span style="font-size:1.8rem; flex-shrink:0;">2&#xFE0F;&#x20E3;</span>
-                    <span style="font-size:0.9rem; color:var(--text);">Scroll down and tap <strong style="color:var(--primary);">"Add to Home Screen"</strong></span>
+                <div style="display:flex; align-items:center; gap:12px; background:rgba(0,212,255,0.07); padding:11px 14px; border-radius:12px; border:1px solid rgba(0,212,255,0.12);">
+                    <span style="background:var(--primary); color:#070D1A; font-weight:800; font-size:0.8rem; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0;">2</span>
+                    <span style="font-size:0.9rem; color:var(--text);">Tap <strong style="color:var(--primary);">"Add to Home Screen"</strong></span>
                 </div>
-                <div style="display:flex; align-items:center; gap:14px; background:rgba(0,212,255,0.06); padding:12px; border-radius:10px;">
-                    <span style="font-size:1.8rem; flex-shrink:0;">3&#xFE0F;&#x20E3;</span>
-                    <span style="font-size:0.9rem; color:var(--text);">Tap <strong style="color:var(--primary);">"Add"</strong> in the top right corner</span>
+                <div style="display:flex; align-items:center; gap:12px; background:rgba(0,212,255,0.07); padding:11px 14px; border-radius:12px; border:1px solid rgba(0,212,255,0.12);">
+                    <span style="background:var(--primary); color:#070D1A; font-weight:800; font-size:0.8rem; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0;">3</span>
+                    <span style="font-size:0.9rem; color:var(--text);">Tap <strong style="color:var(--primary);">"Add"</strong> &#8212; Done!</span>
                 </div>
             </div>
-            <p style="color:#888; font-size:0.75rem; margin-top:16px; text-align:center;">&#x26A0;&#xFE0F; This only works in Safari. Chrome on iOS cannot install apps.</p>
-            <button class="btn btn-secondary w-full" onclick="hideIOSInstallModal()" style="margin-top:16px;">Got it, thanks!</button>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary" onclick="hideIOSInstallModal()" style="flex:1; padding:11px;">Maybe Later</button>
+                <button class="btn btn-primary" onclick="hideIOSInstallModal()" style="flex:2; padding:11px;">Got it &#x2713;</button>
+            </div>
+            <p style="color:#555; font-size:0.7rem; margin-top:10px; text-align:center;">Only works in Safari &#8212; not Chrome on iPhone</p>
         </div>
     </div>
+    <style>
+        @keyframes slideUp { from { transform: translateY(60px); opacity:0; } to { transform: translateY(0); opacity:1; } }
+    </style>
 
     <div id="loginScreen" class="login-container">
         <div class="login-box card">
@@ -4078,23 +4082,20 @@ async function printBillDirect(orderId) {
 }
 
 // ==========================================
-// PWA INSTALLATION LOGIC — All Devices
+// PWA INSTALLATION LOGIC — Maximum Compatibility
 // ==========================================
-let deferredPrompt;
+let deferredPrompt = null;
 
-// ── Helper: detect iOS / iPadOS ──
 function isIOS() {
     return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
-// ── Helper: detect if already installed (standalone mode) ──
 function isInStandaloneMode() {
     return window.matchMedia('(display-mode: standalone)').matches ||
         window.navigator.standalone === true;
 }
 
-// ── iOS Install Modal ──
 function showIOSInstallModal() {
     document.getElementById('iosInstallModal').classList.remove('hidden');
 }
@@ -4102,53 +4103,87 @@ function hideIOSInstallModal() {
     document.getElementById('iosInstallModal').classList.add('hidden');
 }
 
-// ── On load: decide which button to show ──
-window.addEventListener('load', () => {
-    // Already installed — show nothing
-    if (isInStandaloneMode()) return;
+function hideAllInstallUI() {
+    ['pwaInstallBtn','iosInstallBtn'].forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.classList.add('hidden');
+    });
+}
 
-    if (isIOS()) {
-        // iOS/iPadOS: beforeinstallprompt never fires — show manual guide button
-        // Only show if not dismissed recently
-        const dismissed = localStorage.getItem('iosInstallDismissed');
-        if (!dismissed) {
-            const iosBtn = document.getElementById('iosInstallBtn');
-            if (iosBtn) iosBtn.classList.remove('hidden');
-        }
-    }
-    // Android/Desktop: handled by beforeinstallprompt below
-});
-
-// ── Android / Desktop: native install prompt ──
+// ── ANDROID / DESKTOP: catch the prompt as early as possible ──
+// We do NOT call preventDefault() — let the browser show its own mini-infobar too.
+// We ALSO save it so our button can trigger it.
 window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
+    e.preventDefault(); // stop auto-prompt so we control timing
     deferredPrompt = e;
 
+    if (isInStandaloneMode()) return; // already installed
+
     const btn = document.getElementById('pwaInstallBtn');
-    if (btn) {
-        btn.classList.remove('hidden');
-        btn.onclick = async () => {
-            btn.classList.add('hidden');
-            deferredPrompt.prompt();
-            const { outcome } = await deferredPrompt.userChoice;
-            console.log('Install outcome:', outcome);
-            deferredPrompt = null;
-        };
+    if (btn) btn.classList.remove('hidden');
+
+    // Auto-trigger prompt after a 1.5s delay on first visit — feels native
+    const alreadyPrompted = sessionStorage.getItem('pwaPrompted');
+    if (!alreadyPrompted) {
+        sessionStorage.setItem('pwaPrompted', '1');
+        setTimeout(() => triggerInstallPrompt(), 1500);
     }
+});
+
+async function triggerInstallPrompt() {
+    if (!deferredPrompt) return;
+    const btn = document.getElementById('pwaInstallBtn');
+    try {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log('PWA install outcome:', outcome);
+        if (outcome === 'accepted') hideAllInstallUI();
+    } catch(e) {
+        console.log('Prompt error:', e);
+    }
+    deferredPrompt = null;
+    if (btn) btn.classList.add('hidden');
+}
+
+// Button click — for users who dismissed the auto-prompt
+const pwaBtn = document.getElementById('pwaInstallBtn');
+if (pwaBtn) {
+    pwaBtn.onclick = () => {
+        if (deferredPrompt) {
+            triggerInstallPrompt();
+        } else {
+            // Prompt already used — guide them to browser menu
+            showToast('Tap browser menu ⋮ → "Add to Home Screen"');
+        }
+    };
+}
+
+// ── iOS / iPadOS: show tap-to-install guide ──
+window.addEventListener('load', () => {
+    if (isInStandaloneMode()) { hideAllInstallUI(); return; }
+
+    if (isIOS()) {
+        const iosBtn = document.getElementById('iosInstallBtn');
+        if (iosBtn) {
+            iosBtn.classList.remove('hidden');
+            // Auto-show the modal after 2s on first visit
+            const shown = sessionStorage.getItem('iosModalShown');
+            if (!shown) {
+                sessionStorage.setItem('iosModalShown', '1');
+                setTimeout(() => showIOSInstallModal(), 2000);
+            }
+        }
+    }
+});
+
+document.getElementById('iosInstallModal').addEventListener('click', function(e) {
+    if (e.target === this) hideIOSInstallModal();
 });
 
 // ── Installed successfully ──
 window.addEventListener('appinstalled', () => {
-    const btn = document.getElementById('pwaInstallBtn');
-    if (btn) btn.classList.add('hidden');
-    const iosBtn = document.getElementById('iosInstallBtn');
-    if (iosBtn) iosBtn.classList.add('hidden');
-    showToast('App Installed! Launch from your home screen.');
-});
-
-// ── iOS modal dismiss: remember for 3 days ──
-document.getElementById('iosInstallModal').addEventListener('click', function(e) {
-    if (e.target === this) hideIOSInstallModal();
+    hideAllInstallUI();
+    showToast('✅ App Installed! Open from your home screen.');
 });
 
 // ── Service Worker: register + auto-update ──
