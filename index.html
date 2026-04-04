@@ -300,9 +300,45 @@ async function trackUserActivity(phone) {
 <body>
 
     <div id="notification"></div>
+
+    <!-- Android / Desktop Install Button -->
     <button id="pwaInstallBtn" class="btn btn-primary hidden" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; box-shadow: 0 4px 20px rgba(0,212,255,0.45);">
-    📲 Install App
-</button>
+        📲 Install App
+    </button>
+
+    <!-- iOS / iPad Manual Install Guide Button -->
+    <button id="iosInstallBtn" class="btn btn-primary hidden" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; box-shadow: 0 4px 20px rgba(0,212,255,0.45);" onclick="showIOSInstallModal()">
+        📲 Install App
+    </button>
+
+    <!-- iOS Install Instructions Modal -->
+    <div id="iosInstallModal" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,0.88); z-index:99999; display:flex; align-items:flex-end; justify-content:center; padding:20px;">
+        <div style="background:#0D1B2E; border-radius:16px; padding:24px; width:100%; max-width:420px; border:1px solid rgba(0,212,255,0.2); margin-bottom:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <h3 style="color:var(--primary);">📲 Install This App</h3>
+                <button onclick="hideIOSInstallModal()" style="background:none; border:none; color:#aaa; font-size:1.4rem; cursor:pointer; line-height:1;">&#x2715;</button>
+            </div>
+            <p style="color:#aaa; font-size:0.9rem; margin-bottom:20px; line-height:1.6;">
+                To install on your iPhone or iPad, follow these steps:
+            </p>
+            <div style="display:flex; flex-direction:column; gap:14px;">
+                <div style="display:flex; align-items:center; gap:14px; background:rgba(0,212,255,0.06); padding:12px; border-radius:10px;">
+                    <span style="font-size:1.8rem; flex-shrink:0;">1&#xFE0F;&#x20E3;</span>
+                    <span style="font-size:0.9rem; color:var(--text);">Tap the <strong style="color:var(--primary);">Share</strong> button at the bottom of Safari <strong style="color:var(--primary);">&#x2B06;&#xFE0F;</strong></span>
+                </div>
+                <div style="display:flex; align-items:center; gap:14px; background:rgba(0,212,255,0.06); padding:12px; border-radius:10px;">
+                    <span style="font-size:1.8rem; flex-shrink:0;">2&#xFE0F;&#x20E3;</span>
+                    <span style="font-size:0.9rem; color:var(--text);">Scroll down and tap <strong style="color:var(--primary);">"Add to Home Screen"</strong></span>
+                </div>
+                <div style="display:flex; align-items:center; gap:14px; background:rgba(0,212,255,0.06); padding:12px; border-radius:10px;">
+                    <span style="font-size:1.8rem; flex-shrink:0;">3&#xFE0F;&#x20E3;</span>
+                    <span style="font-size:0.9rem; color:var(--text);">Tap <strong style="color:var(--primary);">"Add"</strong> in the top right corner</span>
+                </div>
+            </div>
+            <p style="color:#888; font-size:0.75rem; margin-top:16px; text-align:center;">&#x26A0;&#xFE0F; This only works in Safari. Chrome on iOS cannot install apps.</p>
+            <button class="btn btn-secondary w-full" onclick="hideIOSInstallModal()" style="margin-top:16px;">Got it, thanks!</button>
+        </div>
+    </div>
 
     <div id="loginScreen" class="login-container">
         <div class="login-box card">
@@ -4042,18 +4078,86 @@ async function printBillDirect(orderId) {
 }
 
 // ==========================================
-// PWA INSTALLATION LOGIC
+// PWA INSTALLATION LOGIC — All Devices
 // ==========================================
-let deferredPrompt; 
+let deferredPrompt;
 
-// AUTOMATIC UPDATE RELOADER (Replaces the old Step 1)
+// ── Helper: detect iOS / iPadOS ──
+function isIOS() {
+    return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+// ── Helper: detect if already installed (standalone mode) ──
+function isInStandaloneMode() {
+    return window.matchMedia('(display-mode: standalone)').matches ||
+        window.navigator.standalone === true;
+}
+
+// ── iOS Install Modal ──
+function showIOSInstallModal() {
+    document.getElementById('iosInstallModal').classList.remove('hidden');
+}
+function hideIOSInstallModal() {
+    document.getElementById('iosInstallModal').classList.add('hidden');
+}
+
+// ── On load: decide which button to show ──
+window.addEventListener('load', () => {
+    // Already installed — show nothing
+    if (isInStandaloneMode()) return;
+
+    if (isIOS()) {
+        // iOS/iPadOS: beforeinstallprompt never fires — show manual guide button
+        // Only show if not dismissed recently
+        const dismissed = localStorage.getItem('iosInstallDismissed');
+        if (!dismissed) {
+            const iosBtn = document.getElementById('iosInstallBtn');
+            if (iosBtn) iosBtn.classList.remove('hidden');
+        }
+    }
+    // Android/Desktop: handled by beforeinstallprompt below
+});
+
+// ── Android / Desktop: native install prompt ──
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+
+    const btn = document.getElementById('pwaInstallBtn');
+    if (btn) {
+        btn.classList.remove('hidden');
+        btn.onclick = async () => {
+            btn.classList.add('hidden');
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            console.log('Install outcome:', outcome);
+            deferredPrompt = null;
+        };
+    }
+});
+
+// ── Installed successfully ──
+window.addEventListener('appinstalled', () => {
+    const btn = document.getElementById('pwaInstallBtn');
+    if (btn) btn.classList.add('hidden');
+    const iosBtn = document.getElementById('iosInstallBtn');
+    if (iosBtn) iosBtn.classList.add('hidden');
+    showToast('App Installed! Launch from your home screen.');
+});
+
+// ── iOS modal dismiss: remember for 3 days ──
+document.getElementById('iosInstallModal').addEventListener('click', function(e) {
+    if (e.target === this) hideIOSInstallModal();
+});
+
+// ── Service Worker: register + auto-update ──
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./service-worker.js').then(reg => {
         reg.addEventListener('updatefound', () => {
             const newWorker = reg.installing;
             newWorker.addEventListener('statechange', () => {
                 if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                    // New update found!
                     showToast('Update available! Reloading...');
                     setTimeout(() => window.location.reload(), 2000);
                 }
@@ -4061,44 +4165,6 @@ if ('serviceWorker' in navigator) {
         });
     });
 }
-
-
-// 2. Listen for "Can be installed" event
-window.addEventListener('beforeinstallprompt', (e) => {
-    // Prevent Chrome 67 and earlier from automatically showing the prompt
-    e.preventDefault();
-    // Stash the event so it can be triggered later.
-    deferredPrompt = e;
-    
-    // SHOW the Install Button
-    const btn = document.getElementById('pwaInstallBtn');
-    if(btn) {
-        btn.classList.remove('hidden');
-        
-        // Add Click Event
-        btn.addEventListener('click', async () => {
-            // Hide button immediately
-            btn.classList.add('hidden');
-            // Show the browser's install prompt
-            deferredPrompt.prompt();
-            // Wait for user choice
-            const { outcome } = await deferredPrompt.userChoice;
-            console.log(`User response to install prompt: ${outcome}`);
-            deferredPrompt = null;
-        });
-    }
-});
-
-// 3. Listen for "App Successfully Installed"
-window.addEventListener('appinstalled', () => {
-    // Hide the button permanently
-    const btn = document.getElementById('pwaInstallBtn');
-    if(btn) btn.classList.add('hidden');
-    console.log('PWA Installed Successfully');
-    
-    // Optional: Send analytics or show a "Thank You" toast
-    showToast('App Installed! Launching...');
-});
 
 // ==========================================
 // PUSH NOTIFICATION LOGIC
