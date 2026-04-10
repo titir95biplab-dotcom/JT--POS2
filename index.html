@@ -2150,9 +2150,9 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             const kotStatus = data.kotStatus || null;
             let kotHtml = '';
             if(kotStatus === 'preparing') {
-                kotHtml = `<div style="background:rgba(255,149,0,0.15); border:1px solid rgba(255,149,0,0.4); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:#FF9500; font-weight:600;">🔥 Kitchen Status: PREPARING — existing items locked, can add new items</div>`;
+                kotHtml = `<div style="background:rgba(255,149,0,0.15); border:1px solid rgba(255,149,0,0.4); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:#FF9500; font-weight:600;">🔥 Kitchen Status: PREPARING</div>`;
             } else if(kotStatus === 'completed') {
-                kotHtml = `<div style="background:rgba(0,229,160,0.12); border:1px solid rgba(0,229,160,0.4); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:var(--success); font-weight:600;">✅ Kitchen Status: READY — existing items locked, can add new items</div>`;
+                kotHtml = `<div style="background:rgba(0,229,160,0.12); border:1px solid rgba(0,229,160,0.4); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:var(--success); font-weight:600;">✅ Kitchen Status: READY</div>`;
             } else if(data.status === 'pending' || data.status === 'requested') {
                 kotHtml = `<div style="background:rgba(107,140,174,0.1); border:1px solid rgba(107,140,174,0.3); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:var(--text-muted);">⏳ Kitchen Status: QUEUED</div>`;
             }
@@ -2170,7 +2170,7 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             // 3. Reset Edit State
             disableAdminEdit();
             
-            // 4. Show "Edit" button ONLY if Admin — always show unless no reason to edit
+            // 4. Show "Edit" button ONLY if Admin
             if(STATE.role === 'admin') {
                 document.getElementById('btnAdminEdit').classList.remove('hidden');
             } else {
@@ -2192,16 +2192,13 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
                 if(snap.exists()) {
                     const orderData = snap.data();
                     const kotSt = orderData.kotStatus;
-                    const isPaid = orderData.paymentStatus === 'completed' || orderData.status === 'completed';
-
-                    // If payment is done — allow edit (phone number, add items) but lock item deletion/qty reduction
-                    // based on kotStatus as before. Payment done does NOT block editing.
 
                     if(kotSt === 'completed') {
-                        // Kitchen fully done — lock existing items but allow adding new items and phone edit
-                        ADMIN_KITCHEN_LOCKED_ITEMS = JSON.parse(JSON.stringify(orderData.items));
-                        showToast('⚠️ Kitchen done — you can only ADD items or edit phone', 'warning');
-                    } else if(kotSt === 'preparing') {
+                        // Kitchen fully done — no editing at all
+                        return showToast('❌ Cannot edit — Kitchen has already completed this order', 'error');
+                    }
+
+                    if(kotSt === 'preparing') {
                         // Add-only mode: store original items as locked floor
                         ADMIN_KITCHEN_LOCKED_ITEMS = JSON.parse(JSON.stringify(orderData.items));
                         showToast('⚠️ Kitchen is preparing — you can only ADD items or increase qty', 'warning');
@@ -2932,34 +2929,47 @@ function filterMenu(text) {
         }
 
         function loadOrders() {
-    const { collection, query, orderBy, onSnapshot, where } = window.firebaseModules;
+    const { collection, query, orderBy, onSnapshot, where, Timestamp } = window.firebaseModules;
     
-    // 1. Define "Start of Today" (Midnight)
+    // 1. Define "Start of Today" (Midnight) — use Firestore Timestamp for compatibility
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const todayTimestamp = Timestamp.fromDate(today);
 
-    // 2. Updated Query: Only fetch orders where timestamp is >= Today
-    // NOTE: This will require a Firestore Index. Check your browser console for the link!
+    // 2. Query with composite index (timestamp range + orderBy)
+    // IMPORTANT: If you see a console error about missing index, click the link in the error to create it.
     const q = query(
         collection(window.db, 'orders'), 
-        where('timestamp', '>=', today),
+        where('timestamp', '>=', todayTimestamp),
         orderBy('timestamp', 'desc')
     );
     
-    onSnapshot(q, (snap) => {
-        const orders = snap.docs.map(d => ({id: d.id, ...d.data()}));
+    // 3. Fallback query (no index needed) — used if composite index is missing
+    const qFallback = query(
+        collection(window.db, 'orders'),
+        orderBy('timestamp', 'desc')
+    );
 
-STATE.orders = orders;
+    function processSnapshot(snap) {
+        // Client-side filter to today only
+        const allOrders = snap.docs.map(d => ({id: d.id, ...d.data()}));
+        const orders = allOrders.filter(o => {
+            if (!o.timestamp) return false;
+            const t = o.timestamp.toDate ? o.timestamp.toDate() : new Date(o.timestamp);
+            return t >= today;
+        });
+
+        STATE.orders = orders;
         
         // Filter 1: Incoming Requests
         const requested = orders.filter(o => o.status === 'requested');
         renderIncoming(requested);
         
-        // Filter 2: Pending Orders — only unpaid pending orders
-        const pending = orders.filter(o => o.status === 'pending' && o.paymentStatus !== 'completed');
+        // Filter 2: Pending Orders
+        const pending = orders.filter(o => o.status === 'pending');
         renderCurrentOrders(pending);
         
-        // Filter 3: Completed Orders — all paid/completed orders
+        // Filter 3: Completed Orders (today only)
         const completed = orders.filter(o => o.status === 'completed');
         renderCompletedOrders(completed);
         
@@ -2967,6 +2977,13 @@ STATE.orders = orders;
         const badge = document.getElementById('badgeIncoming');
         if(requested.length > 0) badge.classList.remove('hidden');
         else badge.classList.add('hidden');
+    }
+
+    // Try primary query first; if index missing, fall back to simple query
+    const unsubPrimary = onSnapshot(q, processSnapshot, (err) => {
+        console.warn('⚠️ Composite index missing, falling back to simple query. Create the index from the Firebase console link in the error above.', err);
+        // Fallback: fetch all recent orders and filter client-side
+        onSnapshot(qFallback, processSnapshot);
     });
 }
 
@@ -3120,17 +3137,16 @@ const customerDisplay = o.customerName
                     : `<span style="background:rgba(0,212,255,0.15); color:var(--primary); padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">🖥️ POS</span>`;
 
                 // Edit button logic:
-                // - No kotStatus or queued: full edit allowed
-                // - preparing: add-only mode
-                // - completed: add-only mode (cannot remove what kitchen already made)
+                // - No kotStatus: full edit allowed
+                // - preparing: add-only mode (show warning label)
+                // - completed: fully locked
                 let editBtn;
-                if(!kotStatus || kotStatus === 'queued') {
+                if(!kotStatus) {
                     editBtn = `<button class="btn btn-secondary w-full" onclick="editOrder('${o.id}')">✏️ Edit</button>`;
                 } else if(kotStatus === 'preparing') {
                     editBtn = `<button class="btn btn-warning w-full" onclick="editOrder('${o.id}')" style="font-size:0.8rem;" title="Add items only — cannot remove what kitchen is preparing">➕ Add Items</button>`;
                 } else {
-                    // kotStatus === 'completed' — kitchen done, add-only allowed
-                    editBtn = `<button class="btn btn-warning w-full" onclick="editOrder('${o.id}')" style="font-size:0.8rem; opacity:0.85;" title="Kitchen done — can add items or edit phone">➕ Add/Phone</button>`;
+                    editBtn = `<button class="btn btn-secondary w-full" disabled style="opacity:0.4; cursor:not-allowed;" title="Kitchen has completed this order">🔒 Locked</button>`;
                 }
 
                 return `
@@ -3309,11 +3325,12 @@ function printKOT(orderId) {
             getDoc(doc(window.db, 'orders', orderId)).then(snap => {
                 if(snap.exists()) {
                     const data = snap.data();
-                    // If kitchen is done (ready): allow add-only mode (lock existing items)
+                    // If kitchen is fully done (ready), block all editing
                     if(data.kotStatus === 'completed') {
-                        STATE.kitchenLockedItems = JSON.parse(JSON.stringify(data.items));
-                        showToast('⚠️ Kitchen done — you can only ADD items or edit phone', 'warning');
-                    } else if(data.kotStatus === 'preparing') {
+                        return showToast('❌ Cannot edit — Kitchen has already completed this order', 'error');
+                    }
+                    // If kitchen is preparing: allow add-only mode (lock existing items)
+                    if(data.kotStatus === 'preparing') {
                         // Store original items as locked — cannot reduce qty or remove
                         STATE.kitchenLockedItems = JSON.parse(JSON.stringify(data.items));
                         showToast('⚠️ Kitchen is preparing — you can only ADD items', 'warning');
@@ -3361,12 +3378,6 @@ async function deletePendingOrder(orderId) {
                 const { doc, updateDoc, getDoc } = window.firebaseModules;
                 
                 const snap = await getDoc(doc(window.db, 'orders', orderId));
-                
-                // Block cancellation if payment already done
-                if (snap.exists() && snap.data().paymentStatus === 'completed') {
-                    return showToast('❌ Payment already done — cannot cancel this order', 'error');
-                }
-                
                 // Only release stock if it was actually blocked — prevents phantom releases
                 if (snap.exists() && snap.data().stockBlocked) {
                     await releaseIngredientStock(snap.data().items);
@@ -3704,11 +3715,8 @@ async function deletePendingOrder(orderId) {
                     }
 
                     // Prepare order update data
-                    // status: 'completed' so sale reports work correctly.
-                    // paymentStatus: 'completed' as extra marker for KOT display.
                     const orderUpdate = {
                         status: 'completed',
-                        paymentStatus: 'completed',
                         redeemed: redeem,
                         finalPaid: netPayable,
                         bonusEarned: newBonus,
@@ -3733,7 +3741,7 @@ async function deletePendingOrder(orderId) {
                         orderUpdate.onlineAmount = partialOnline;
                     }
 
-                    // Update Order — status:'completed' for reports, paymentStatus for KOT display
+                    // Update Order
                     transaction.update(orderRef, { ...orderUpdate, stockBlocked: false });
 
                     // Store Data for Bill
