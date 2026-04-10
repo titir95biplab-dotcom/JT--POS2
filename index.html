@@ -2955,12 +2955,12 @@ STATE.orders = orders;
         const requested = orders.filter(o => o.status === 'requested');
         renderIncoming(requested);
         
-        // Filter 2: Pending Orders — exclude ones where payment is already done
+        // Filter 2: Pending Orders — only unpaid pending orders
         const pending = orders.filter(o => o.status === 'pending' && o.paymentStatus !== 'completed');
         renderCurrentOrders(pending);
         
-        // Filter 3: Completed Orders — both traditionally completed AND payment-done-but-still-pending
-        const completed = orders.filter(o => o.status === 'completed' || (o.status === 'pending' && o.paymentStatus === 'completed'));
+        // Filter 3: Completed Orders — all paid/completed orders
+        const completed = orders.filter(o => o.status === 'completed');
         renderCompletedOrders(completed);
         
         // Badge Logic
@@ -3228,20 +3228,13 @@ function printKOT(orderId) {
                 const hasDiscount = o.discount && o.discount.amount > 0;
                 const discountBadge = hasDiscount ? `<span class="discount-badge">🎫 ${o.discount.code}</span>` : '';
 
-                // Payment-done-but-kitchen-pending badge
-                const isPaidPending = o.status === 'pending' && o.paymentStatus === 'completed';
-                const kitchenPendingBadge = isPaidPending
-                    ? `<span style="background:rgba(255,149,0,0.2); color:#FF9500; padding:2px 8px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">⏳ KITCHEN IN PROGRESS</span>`
-                    : '';
-
                 return `
                 <div class="order-card ${hasDiscount ? 'discount-applied' : ''}" onclick="viewOrderDetails('${o.id}')" style="cursor:pointer; position:relative;">
                     ${discountBadge}
                     <div class="flex justify-between" style="align-items:flex-start;">
                         <div>
                             <div style="margin-bottom:5px;">${customerDisplay}</div>
-                            <span class="order-status status-completed" style="font-size:0.65rem;">PAID ✓</span>
-                            ${kitchenPendingBadge}
+                            <span class="order-status status-completed" style="font-size:0.65rem;">COMPLETED</span>
                             <span class="text-muted" style="font-size:0.75rem; margin-left:5px;">📅 ${timeStr}</span>
                         </div>
                         <div style="text-align:right;">
@@ -3711,9 +3704,10 @@ async function deletePendingOrder(orderId) {
                     }
 
                     // Prepare order update data
-                    // NOTE: status stays 'pending' so kitchen still sees the order.
-                    // paymentStatus: 'completed' marks it as paid without removing from kitchen.
+                    // status: 'completed' so sale reports work correctly.
+                    // paymentStatus: 'completed' as extra marker for KOT display.
                     const orderUpdate = {
+                        status: 'completed',
                         paymentStatus: 'completed',
                         redeemed: redeem,
                         finalPaid: netPayable,
@@ -3739,8 +3733,7 @@ async function deletePendingOrder(orderId) {
                         orderUpdate.onlineAmount = partialOnline;
                     }
 
-                    // Update Order — status stays 'pending' so kitchen still sees it.
-                    // stockBlocked set to false as payment is done (stock will be deducted).
+                    // Update Order — status:'completed' for reports, paymentStatus for KOT display
                     transaction.update(orderRef, { ...orderUpdate, stockBlocked: false });
 
                     // Store Data for Bill
