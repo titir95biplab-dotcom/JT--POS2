@@ -2150,9 +2150,9 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             const kotStatus = data.kotStatus || null;
             let kotHtml = '';
             if(kotStatus === 'preparing') {
-                kotHtml = `<div style="background:rgba(255,149,0,0.15); border:1px solid rgba(255,149,0,0.4); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:#FF9500; font-weight:600;">🔥 Kitchen Status: PREPARING</div>`;
+                kotHtml = `<div style="background:rgba(255,149,0,0.15); border:1px solid rgba(255,149,0,0.4); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:#FF9500; font-weight:600;">🔥 Kitchen Status: PREPARING — existing items locked, can add new items</div>`;
             } else if(kotStatus === 'completed') {
-                kotHtml = `<div style="background:rgba(0,229,160,0.12); border:1px solid rgba(0,229,160,0.4); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:var(--success); font-weight:600;">✅ Kitchen Status: READY</div>`;
+                kotHtml = `<div style="background:rgba(0,229,160,0.12); border:1px solid rgba(0,229,160,0.4); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:var(--success); font-weight:600;">✅ Kitchen Status: READY — existing items locked, can add new items</div>`;
             } else if(data.status === 'pending' || data.status === 'requested') {
                 kotHtml = `<div style="background:rgba(107,140,174,0.1); border:1px solid rgba(107,140,174,0.3); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:var(--text-muted);">⏳ Kitchen Status: QUEUED</div>`;
             }
@@ -2170,7 +2170,7 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             // 3. Reset Edit State
             disableAdminEdit();
             
-            // 4. Show "Edit" button ONLY if Admin
+            // 4. Show "Edit" button ONLY if Admin — always show unless no reason to edit
             if(STATE.role === 'admin') {
                 document.getElementById('btnAdminEdit').classList.remove('hidden');
             } else {
@@ -2192,13 +2192,16 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
                 if(snap.exists()) {
                     const orderData = snap.data();
                     const kotSt = orderData.kotStatus;
+                    const isPaid = orderData.paymentStatus === 'completed' || orderData.status === 'completed';
+
+                    // If payment is done — allow edit (phone number, add items) but lock item deletion/qty reduction
+                    // based on kotStatus as before. Payment done does NOT block editing.
 
                     if(kotSt === 'completed') {
-                        // Kitchen fully done — no editing at all
-                        return showToast('❌ Cannot edit — Kitchen has already completed this order', 'error');
-                    }
-
-                    if(kotSt === 'preparing') {
+                        // Kitchen fully done — lock existing items but allow adding new items and phone edit
+                        ADMIN_KITCHEN_LOCKED_ITEMS = JSON.parse(JSON.stringify(orderData.items));
+                        showToast('⚠️ Kitchen done — you can only ADD items or edit phone', 'warning');
+                    } else if(kotSt === 'preparing') {
                         // Add-only mode: store original items as locked floor
                         ADMIN_KITCHEN_LOCKED_ITEMS = JSON.parse(JSON.stringify(orderData.items));
                         showToast('⚠️ Kitchen is preparing — you can only ADD items or increase qty', 'warning');
@@ -2952,12 +2955,12 @@ STATE.orders = orders;
         const requested = orders.filter(o => o.status === 'requested');
         renderIncoming(requested);
         
-        // Filter 2: Pending Orders
-        const pending = orders.filter(o => o.status === 'pending');
+        // Filter 2: Pending Orders — exclude ones where payment is already done
+        const pending = orders.filter(o => o.status === 'pending' && o.paymentStatus !== 'completed');
         renderCurrentOrders(pending);
         
-        // Filter 3: Completed Orders (Already filtered to "Today" by the query above)
-        const completed = orders.filter(o => o.status === 'completed');
+        // Filter 3: Completed Orders — both traditionally completed AND payment-done-but-still-pending
+        const completed = orders.filter(o => o.status === 'completed' || (o.status === 'pending' && o.paymentStatus === 'completed'));
         renderCompletedOrders(completed);
         
         // Badge Logic
@@ -3117,16 +3120,17 @@ const customerDisplay = o.customerName
                     : `<span style="background:rgba(0,212,255,0.15); color:var(--primary); padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">🖥️ POS</span>`;
 
                 // Edit button logic:
-                // - No kotStatus: full edit allowed
-                // - preparing: add-only mode (show warning label)
-                // - completed: fully locked
+                // - No kotStatus or queued: full edit allowed
+                // - preparing: add-only mode
+                // - completed: add-only mode (cannot remove what kitchen already made)
                 let editBtn;
-                if(!kotStatus) {
+                if(!kotStatus || kotStatus === 'queued') {
                     editBtn = `<button class="btn btn-secondary w-full" onclick="editOrder('${o.id}')">✏️ Edit</button>`;
                 } else if(kotStatus === 'preparing') {
                     editBtn = `<button class="btn btn-warning w-full" onclick="editOrder('${o.id}')" style="font-size:0.8rem;" title="Add items only — cannot remove what kitchen is preparing">➕ Add Items</button>`;
                 } else {
-                    editBtn = `<button class="btn btn-secondary w-full" disabled style="opacity:0.4; cursor:not-allowed;" title="Kitchen has completed this order">🔒 Locked</button>`;
+                    // kotStatus === 'completed' — kitchen done, add-only allowed
+                    editBtn = `<button class="btn btn-warning w-full" onclick="editOrder('${o.id}')" style="font-size:0.8rem; opacity:0.85;" title="Kitchen done — can add items or edit phone">➕ Add/Phone</button>`;
                 }
 
                 return `
@@ -3224,13 +3228,20 @@ function printKOT(orderId) {
                 const hasDiscount = o.discount && o.discount.amount > 0;
                 const discountBadge = hasDiscount ? `<span class="discount-badge">🎫 ${o.discount.code}</span>` : '';
 
+                // Payment-done-but-kitchen-pending badge
+                const isPaidPending = o.status === 'pending' && o.paymentStatus === 'completed';
+                const kitchenPendingBadge = isPaidPending
+                    ? `<span style="background:rgba(255,149,0,0.2); color:#FF9500; padding:2px 8px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">⏳ KITCHEN IN PROGRESS</span>`
+                    : '';
+
                 return `
                 <div class="order-card ${hasDiscount ? 'discount-applied' : ''}" onclick="viewOrderDetails('${o.id}')" style="cursor:pointer; position:relative;">
                     ${discountBadge}
                     <div class="flex justify-between" style="align-items:flex-start;">
                         <div>
                             <div style="margin-bottom:5px;">${customerDisplay}</div>
-                            <span class="order-status status-completed" style="font-size:0.65rem;">COMPLETED</span>
+                            <span class="order-status status-completed" style="font-size:0.65rem;">PAID ✓</span>
+                            ${kitchenPendingBadge}
                             <span class="text-muted" style="font-size:0.75rem; margin-left:5px;">📅 ${timeStr}</span>
                         </div>
                         <div style="text-align:right;">
@@ -3305,12 +3316,11 @@ function printKOT(orderId) {
             getDoc(doc(window.db, 'orders', orderId)).then(snap => {
                 if(snap.exists()) {
                     const data = snap.data();
-                    // If kitchen is fully done (ready), block all editing
+                    // If kitchen is done (ready): allow add-only mode (lock existing items)
                     if(data.kotStatus === 'completed') {
-                        return showToast('❌ Cannot edit — Kitchen has already completed this order', 'error');
-                    }
-                    // If kitchen is preparing: allow add-only mode (lock existing items)
-                    if(data.kotStatus === 'preparing') {
+                        STATE.kitchenLockedItems = JSON.parse(JSON.stringify(data.items));
+                        showToast('⚠️ Kitchen done — you can only ADD items or edit phone', 'warning');
+                    } else if(data.kotStatus === 'preparing') {
                         // Store original items as locked — cannot reduce qty or remove
                         STATE.kitchenLockedItems = JSON.parse(JSON.stringify(data.items));
                         showToast('⚠️ Kitchen is preparing — you can only ADD items', 'warning');
@@ -3358,6 +3368,12 @@ async function deletePendingOrder(orderId) {
                 const { doc, updateDoc, getDoc } = window.firebaseModules;
                 
                 const snap = await getDoc(doc(window.db, 'orders', orderId));
+                
+                // Block cancellation if payment already done
+                if (snap.exists() && snap.data().paymentStatus === 'completed') {
+                    return showToast('❌ Payment already done — cannot cancel this order', 'error');
+                }
+                
                 // Only release stock if it was actually blocked — prevents phantom releases
                 if (snap.exists() && snap.data().stockBlocked) {
                     await releaseIngredientStock(snap.data().items);
@@ -3695,8 +3711,10 @@ async function deletePendingOrder(orderId) {
                     }
 
                     // Prepare order update data
+                    // NOTE: status stays 'pending' so kitchen still sees the order.
+                    // paymentStatus: 'completed' marks it as paid without removing from kitchen.
                     const orderUpdate = {
-                        status: 'completed',
+                        paymentStatus: 'completed',
                         redeemed: redeem,
                         finalPaid: netPayable,
                         bonusEarned: newBonus,
@@ -3721,7 +3739,8 @@ async function deletePendingOrder(orderId) {
                         orderUpdate.onlineAmount = partialOnline;
                     }
 
-                    // Update Order
+                    // Update Order — status stays 'pending' so kitchen still sees it.
+                    // stockBlocked set to false as payment is done (stock will be deducted).
                     transaction.update(orderRef, { ...orderUpdate, stockBlocked: false });
 
                     // Store Data for Bill
