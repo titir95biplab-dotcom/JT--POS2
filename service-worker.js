@@ -29,7 +29,7 @@ messaging.onBackgroundMessage((payload) => {
 
 
 // ── PWA CACHING ──────────────────────────────────────────
-const CACHE_NAME = 'jt-majherhati-pos-v4';
+const CACHE_NAME = 'jt-majherhati-pos-v5';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
