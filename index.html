@@ -17,7 +17,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
         import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-messaging.js";
-        import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, serverTimestamp, increment, addDoc, runTransaction, Timestamp, getCountFromServer } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+        import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, serverTimestamp, increment, addDoc, runTransaction, Timestamp, getCountFromServer, arrayUnion } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDaBliTCScl1DyMc1h96Pe6_79lKWyB-VQ",
@@ -37,7 +37,7 @@
         window.firebaseModules = { 
             signInWithEmailAndPassword, signOut, onAuthStateChanged, 
             collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc, runTransaction,
-            query, where, orderBy, onSnapshot, serverTimestamp, increment, Timestamp, getMessaging, getToken, onMessage, messaging,
+            query, where, orderBy, onSnapshot, serverTimestamp, increment, arrayUnion, Timestamp, getMessaging, getToken, onMessage, messaging,
             getCountFromServer // <--- IMPORTANT: Added this here!
         };
         window.firebaseReady = true;
@@ -377,7 +377,7 @@ async function trackUserActivity(phone) {
         </header>
         <div class="app-layout">
             <div class="tabs">
-                <button class="btn btn-secondary tab-btn active" onclick="switchAdminTab('dashboard')" id="btn-adm-dash">📊 Analytics</button>
+                <button class="btn btn-secondary tab-btn active" onclick="switchAdminTab('dashboard')" id="btn-adm-dashboard">📊 Analytics</button>
                 <button class="btn btn-secondary tab-btn" onclick="switchAdminTab('menu')" id="btn-adm-menu">🍔 Menu</button>
                 <button class="btn btn-secondary tab-btn" onclick="switchAdminTab('orders')" id="btn-adm-orders">📜 Orders</button>
                 <button class="btn btn-secondary tab-btn" onclick="switchAdminTab('settings')" id="btn-adm-settings">⚙️ Settings</button>
@@ -407,35 +407,89 @@ async function trackUserActivity(phone) {
         <div id="adminNotifHistory"></div>
     </div>
 </div>
-<!-- ADMIN INVENTORY VIEW -->
+<!-- ADMIN INVENTORY VIEW — Dynamic Recipe System -->
 <div id="adm-view-inventory" class="hidden">
+
+    <!-- ── SECTION 1: Stock Tracker ── -->
     <div class="card">
-        <div class="flex justify-between items-center" style="margin-bottom:15px;">
+        <div class="flex justify-between items-center" style="margin-bottom:15px; flex-wrap:wrap; gap:8px;">
             <h3>🏪 Ingredient Stock</h3>
-            <button class="btn btn-primary btn-sm" onclick="showAddIngredientModal()">➕ Add Ingredient</button>
+            <div class="flex gap-2">
+                <button class="btn btn-secondary btn-sm" onclick="recalcBlockedStock()" title="Recompute blockedStock for every ingredient from currently open orders — fixes drift from old bugs or deleted orders">🔧 Recalculate Blocked</button>
+                <button class="btn btn-primary btn-sm" onclick="showAddIngredientModal()">➕ Add Ingredient</button>
+            </div>
         </div>
-        <p class="text-muted" style="font-size:0.85rem; margin-bottom:15px;">Manage raw ingredients and their current stock levels.</p>
+        <p class="text-muted" style="font-size:0.85rem; margin-bottom:15px;">Track raw ingredient stock levels. These are also available as selectable items in the Recipe Builder below.</p>
         <div id="adminIngredientsList"></div>
     </div>
 
+    <!-- ── SECTION 2: Dynamic Recipe Builder ── -->
     <div class="card" style="margin-top:20px;">
-        <h3>🔗 Item Ingredients (Recipe)</h3>
-        <p class="text-muted" style="font-size:0.85rem; margin-bottom:15px;">Assign ingredients to menu items. When an order is placed, stock will be deducted automatically.</p>
+        <div class="flex justify-between items-center" style="flex-wrap:wrap; gap:8px;">
+            <h3>🔗 Dynamic Recipe Builder</h3>
+            <button class="btn btn-warning btn-sm" onclick="migrateLegacyRecipes()" title="Import recipes saved by the old system (menu subcollections) into the new embedded format">♻️ Import Old Recipes</button>
+        </div>
+        <p class="text-muted" style="font-size:0.85rem; margin-bottom:15px;">
+            Assign preparation steps to each menu item. Each step specifies an ingredient, quantity, prep station, and action. The KOT system uses this to auto-aggregate kitchen tasks.
+        </p>
+
+        <!-- Item selector -->
         <div style="margin-bottom:15px;">
             <label class="text-muted" style="font-size:0.85rem;">Select Menu Item</label>
             <select id="recipeItemSelect" class="input" onchange="loadItemRecipe(this.value)">
-                <option value="">-- Select an item --</option>
+                <option value="">-- Select a menu item --</option>
             </select>
         </div>
+
+        <!-- Recipe steps for selected item -->
         <div id="recipeSection" class="hidden">
             <div id="recipeIngredientsList" style="margin-bottom:15px;"></div>
-            <div class="flex gap-2" style="flex-wrap:wrap;">
-                <select id="recipeAddIngredientSelect" class="input" style="flex:2; margin:0;">
-                    <option value="">-- Add Ingredient --</option>
-                </select>
-                <input type="number" id="recipeAddQty" class="input" placeholder="Qty" style="flex:1; margin:0; max-width:80px;" min="0.01" step="0.01">
-                <input type="text" id="recipeAddUnit" class="input" placeholder="Unit (e.g. pcs, g)" style="flex:1; margin:0; max-width:100px;">
-                <button class="btn btn-success btn-sm" onclick="addRecipeIngredient()">Add</button>
+
+            <!-- Add new recipe step -->
+            <div style="background:rgba(0,212,255,0.05); border:1px solid rgba(0,212,255,0.15); border-radius:10px; padding:14px; margin-top:8px;">
+                <div style="font-size:0.82rem; font-weight:700; color:var(--primary); margin-bottom:10px; text-transform:uppercase; letter-spacing:0.5px;">➕ Add Prep Step</div>
+                <div class="flex gap-2" style="flex-wrap:wrap; margin-bottom:8px;">
+                    <div style="flex:2; min-width:160px;">
+                        <label class="text-muted" style="font-size:0.78rem;">Ingredient</label>
+                        <select id="recipeIngSelect" class="input" style="margin:0;" onchange="onRecipeIngChange(this)">
+                            <option value="">-- Select ingredient --</option>
+                        </select>
+                    </div>
+                    <div style="flex:1; min-width:70px; max-width:90px;">
+                        <label class="text-muted" style="font-size:0.78rem;">Qty</label>
+                        <input type="number" id="recipeAddQty" class="input" placeholder="e.g. 2" style="margin:0;" min="0.01" step="0.01">
+                    </div>
+                    <div style="flex:1; min-width:70px; max-width:90px;">
+                        <label class="text-muted" style="font-size:0.78rem;">Unit <span style="font-size:0.7rem; opacity:0.6;">(auto)</span></label>
+                        <input type="text" id="recipeAddUnit" class="input" placeholder="pcs / g" style="margin:0;">
+                    </div>
+                </div>
+                <div class="flex gap-2" style="flex-wrap:wrap; margin-bottom:10px;">
+                    <div style="flex:1; min-width:130px;">
+                        <label class="text-muted" style="font-size:0.78rem;">🏭 Station</label>
+                        <select id="recipeStation" class="input" style="margin:0;">
+                            <option value="Fryer">🔥 Fryer</option>
+                            <option value="Pizza Oven">🍕 Pizza Oven</option>
+                            <option value="Beverage">🥤 Beverage</option>
+                            <option value="Assembly">🥗 Assembly</option>
+                            <option value="Grill">🍖 Grill</option>
+                            <option value="Tandoor">🫓 Tandoor</option>
+                        </select>
+                    </div>
+                    <div style="flex:1; min-width:130px;">
+                        <label class="text-muted" style="font-size:0.78rem;">⚙️ Action</label>
+                        <select id="recipeAction" class="input" style="margin:0;">
+                            <option value="Fry">Fry</option>
+                            <option value="Bake">Bake</option>
+                            <option value="Blend">Blend</option>
+                            <option value="Assemble">Assemble</option>
+                            <option value="Grill">Grill</option>
+                            <option value="Tandoor">Tandoor</option>
+                            <option value="Prepare">Prepare</option>
+                        </select>
+                    </div>
+                </div>
+                <button class="btn btn-success w-full" onclick="addRecipeStep()" style="font-size:0.9rem;">✅ Add Step to Recipe</button>
             </div>
         </div>
     </div>
@@ -2072,9 +2126,18 @@ function renderSalesChart(dailyData) {
                     transaction.delete(orderRef);
                 });
 
-                // 4. Restore ingredient stock (only for completed orders — cancelled already released)
-                if (orderDataCache && orderDataCache.status === 'completed' && orderDataCache.items) {
-                    await restoreIngredientStock(orderDataCache.items);
+                // 4. Reverse the order's effect on ingredient stock — handles EVERY order state:
+                //    • Finalized (paid OR kitchen-completed): ingredients were consumed → put stock back
+                //    • Still blocked (pending/preparing): reservation exists → release the block
+                //    • Cancelled / never blocked: nothing to do
+                if (orderDataCache && orderDataCache.items) {
+                    const wasConsumed = orderDataCache.stockFinalized === true ||
+                        (orderDataCache.status === 'completed' && !orderDataCache.stockBlocked);
+                    if (wasConsumed) {
+                        await restoreIngredientStock(orderDataCache.items);   // stock += qty
+                    } else if (orderDataCache.stockBlocked) {
+                        await releaseIngredientStock(orderDataCache.items, orderDataCache.stockModel || 'legacy-block-deducted'); // blockedStock -= qty
+                    }
                 }
                 
                 showToast('Order deleted & points reversed');
@@ -2280,11 +2343,14 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
     const newMode = document.getElementById('editMode').value;
 
     try {
-        const { doc, runTransaction, serverTimestamp } = window.firebaseModules;
+        const { doc, runTransaction, updateDoc } = window.firebaseModules;
         
         // পুরনো ডেটা সেভ রাখার জন্য ভেরিয়েবল
         let oldItems = [];
         let oldStatus = '';
+        let oldStockModel = 'reserved-v2';
+        let oldBlocked = false;
+        let oldFinalized = false;
         
         // 2. Run a Transaction (Ensures points & order update together)
         await runTransaction(window.db, async (transaction) => {
@@ -2300,6 +2366,9 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             // ইনভেন্টরি অ্যাডজাস্ট করার জন্য পুরনো ডেটা স্টোর করে রাখা
             oldItems = oldOrderData.items || [];
             oldStatus = oldOrderData.status;
+            oldStockModel = oldOrderData.stockModel || 'legacy-block-deducted';
+            oldBlocked = !!oldOrderData.stockBlocked;
+            oldFinalized = !!oldOrderData.stockFinalized;
 
             // B. Calculate Point Adjustments (Only if order is completed)
             let newBonus = 0;
@@ -2349,18 +2418,30 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
         });
         
         // --- INVENTORY FIX FOR ADMIN EDIT START ---
-        if (oldStatus === 'completed') {
-            // ১. পুরনো আইটেমের স্টক ইনভেন্টরিতে ফেরত দেওয়া (Restore)
+        // Decide based on the order's ACTUAL stock state, not just its status
+        const wasConsumed = oldFinalized || (oldStatus === 'completed' && !oldBlocked);
+        let newStockBlocked = false;
+        let newFinalized = false;
+
+        if (wasConsumed) {
+            // Old items were consumed: put their stock back, then directly consume the new items
             await restoreIngredientStock(oldItems);
-            // ২. নতুন আইটেমের স্টক সরাসরি মাইনাস করা (Block + Deduct = Direct Minus)
-            await blockIngredientStock(newItems);
-            await deductBlockedStock(newItems);
-        } else if (oldStatus === 'pending' || oldStatus === 'requested') {
-            // ১. পুরনো ব্লক হওয়া স্টক রিলিজ করা
-            await releaseIngredientStock(oldItems);
-            // ২. নতুন স্টক ব্লক করা
-            await blockIngredientStock(newItems);
+            newStockBlocked = await blockIngredientStock(newItems);
+            if (newStockBlocked) await deductBlockedStock(newItems, 'reserved-v2');
+            newFinalized = newStockBlocked; // consumed state maintained
+        } else if (oldBlocked) {
+            // Old items were only reserved: release the reservation, block the new items
+            await releaseIngredientStock(oldItems, oldStockModel);
+            newStockBlocked = await blockIngredientStock(newItems);
+        } else {
+            // Nothing was ever blocked (e.g. no recipes at order time): just try blocking new items
+            newStockBlocked = await blockIngredientStock(newItems);
         }
+        await updateDoc(doc(window.db, 'orders', CURRENT_VIEW_ORDER_ID), {
+            stockBlocked: wasConsumed ? false : newStockBlocked,
+            stockModel: newStockBlocked ? 'reserved-v2' : null,
+            stockFinalized: newFinalized
+        });
         // --- INVENTORY FIX FOR ADMIN EDIT END ---
         
         // 3. Success UI Updates
@@ -2853,6 +2934,9 @@ function filterMenu(text) {
                 await submitOrder(phone, STATE.cart, 'pending');
                 clearCart();
                 switchOutletTab('current');
+            } catch(e) {
+                console.error(e);
+                showToast('Order failed: ' + (e.message || e), 'error');
             } finally {
                 isSubmitting = false;
                 if (btn) { btn.disabled = false; btn.innerText = '✅ Place Order'; }
@@ -2869,6 +2953,9 @@ function filterMenu(text) {
                 renderActiveCart();
                 showToast('Order Request Sent');
                 switchCustTab('history');
+            } catch(e) {
+                console.error(e);
+                showToast('Order failed: ' + (e.message || e), 'error');
             } finally {
                 isSubmitting = false;
             }
@@ -2910,7 +2997,16 @@ function filterMenu(text) {
             }
             
             // 2. Save Order — stockBlocked flag tracks whether inventory has been blocked
-            await addDoc(collection(window.db, 'orders'), {
+            let stockBlocked = false;
+            try {
+                stockBlocked = await blockIngredientStock(itemsSnapshot);
+            } catch(e) {
+                console.error('Stock block failed:', e);
+                throw new Error('Inventory could not be blocked. Please check recipe and stock setup.');
+            }
+
+            try {
+                await addDoc(collection(window.db, 'orders'), {
                 items: itemsSnapshot, 
                 phone: phone, 
                 customerName: custName,
@@ -2919,13 +3015,19 @@ function filterMenu(text) {
                 total: finalTotal,
                 status: status, 
                 timestamp: serverTimestamp(),
-                stockBlocked: true,
+                stockBlocked: stockBlocked,
+                stockModel: stockBlocked ? 'reserved-v2' : null,
+                stockFinalized: false,
                 kotStatus: null,        // KOT status: null | 'preparing' | 'completed'
                 orderSource: source     // 'pos' | 'customer'
-            });
-
-            // 3. Block ingredient stock for this order
-            await blockIngredientStock(itemsSnapshot);
+                });
+            } catch(e) {
+                if (stockBlocked) {
+                    await releaseIngredientStock(itemsSnapshot, 'reserved-v2')
+                        .catch(releaseErr => console.error('Rollback stock release failed:', releaseErr));
+                }
+                throw e;
+            }
         }
 
         function loadOrders() {
@@ -3305,19 +3407,28 @@ function printKOT(orderId) {
 
         async function updateOrderStatus(id, status) {
             const { doc, updateDoc, getDoc } = window.firebaseModules;
-            // If cancelling, only release blocked stock if it was actually blocked
-            if (status === 'cancelled') {
-                try {
-                    const snap = await getDoc(doc(window.db, 'orders', id));
-                    if (snap.exists() && snap.data().stockBlocked) {
-                        await releaseIngredientStock(snap.data().items);
+            const orderRef = doc(window.db, 'orders', id);
+            const orderUpdate = { status };
+
+            try {
+                const snap = await getDoc(orderRef);
+                if (snap.exists()) {
+                    const orderData = snap.data();
+                    if (status === 'cancelled' && orderData.stockBlocked) {
+                        await releaseIngredientStock(orderData.items, orderData.stockModel || 'legacy-block-deducted');
+                        orderUpdate.stockBlocked = false;
+                    } else if (status === 'pending' && !orderData.stockBlocked) {
+                        const stockBlocked = await blockIngredientStock(orderData.items || []);
+                        orderUpdate.stockBlocked = stockBlocked;
+                        orderUpdate.stockModel = stockBlocked ? 'reserved-v2' : null;
                     }
-                } catch(e) { console.error('Stock release error:', e); }
+                }
+            } catch(e) {
+                console.error('Stock status update error:', e);
             }
-            await updateDoc(doc(window.db, 'orders', id), { 
-                status,
-                ...(status === 'cancelled' ? { stockBlocked: false } : {})
-            });
+
+            if (status === 'cancelled') orderUpdate.stockBlocked = false;
+            await updateDoc(orderRef, orderUpdate);
         }
 
         function editOrder(orderId) {
@@ -3380,7 +3491,8 @@ async function deletePendingOrder(orderId) {
                 const snap = await getDoc(doc(window.db, 'orders', orderId));
                 // Only release stock if it was actually blocked — prevents phantom releases
                 if (snap.exists() && snap.data().stockBlocked) {
-                    await releaseIngredientStock(snap.data().items);
+                    const orderData = snap.data();
+                    await releaseIngredientStock(orderData.items, orderData.stockModel || 'legacy-block-deducted');
                 }
 
                 await updateDoc(doc(window.db, 'orders', orderId), {
@@ -3454,13 +3566,15 @@ async function deletePendingOrder(orderId) {
                 const oldOrderSnap = await getDoc(orderRef);
                 
                 // Only release if stock was actually blocked — prevents phantom releases
+                let newStockBlocked = false;
                 if (oldOrderSnap.exists() && oldOrderSnap.data().stockBlocked) {
-                    const oldItems = oldOrderSnap.data().items || [];
-                    await releaseIngredientStock(oldItems);
+                    const oldOrderData = oldOrderSnap.data();
+                    const oldItems = oldOrderData.items || [];
+                    await releaseIngredientStock(oldItems, oldOrderData.stockModel || 'legacy-block-deducted');
                 }
                 
                 // Block stock for updated items
-                await blockIngredientStock(itemsSnapshot);
+                newStockBlocked = await blockIngredientStock(itemsSnapshot);
                 // --- END INVENTORY FIX ---
 
                 // 3. Update the Order
@@ -3471,7 +3585,8 @@ async function deletePendingOrder(orderId) {
                     total: finalTotal,
                     phone: newPhone,
                     customerName: custName,
-                    stockBlocked: true
+                    stockBlocked: newStockBlocked,
+                    stockModel: newStockBlocked ? 'reserved-v2' : null
                 });
                 
                 showToast('Order & Phone Updated');
@@ -3700,9 +3815,15 @@ async function deletePendingOrder(orderId) {
                     const custDoc = await transaction.get(custRef);
                     if (!orderDoc.exists()) throw "Order not found!";
                     
-                    // Save items for bill
-                    PAYMENT_DATA.items = orderDoc.data().items;
-                    PAYMENT_DATA.serial = orderDoc.data().timestamp ? orderDoc.data().timestamp.toMillis().toString().slice(-4) : '0000';
+                    const orderData = orderDoc.data();
+
+                    // Save items for bill and stock finalization
+                    PAYMENT_DATA.items = orderData.items;
+                    PAYMENT_DATA.serial = orderData.timestamp ? orderData.timestamp.toMillis().toString().slice(-4) : '0000';
+                    // Deduct only if stock is still reserved AND nobody (e.g. kitchen) finalized it already
+                    PAYMENT_DATA.shouldDeduct = !!orderData.stockBlocked && !orderData.stockFinalized;
+                    PAYMENT_DATA.stockModel = orderData.stockModel || 'legacy-block-deducted';
+                    PAYMENT_DATA.alreadyFinalized = !!orderData.stockFinalized;
                     
                     const currentPoints = custDoc.exists() ? (custDoc.data().points || 0) : 0;
                     if (redeem > currentPoints) throw "Insufficient points!";
@@ -3741,8 +3862,12 @@ async function deletePendingOrder(orderId) {
                         orderUpdate.onlineAmount = partialOnline;
                     }
 
-                    // Update Order
-                    transaction.update(orderRef, { ...orderUpdate, stockBlocked: false });
+                    // Update Order — claim stock finalization so kitchen-completion can't double-deduct
+                    transaction.update(orderRef, {
+                        ...orderUpdate,
+                        stockBlocked: false,
+                        stockFinalized: PAYMENT_DATA.shouldDeduct ? true : PAYMENT_DATA.alreadyFinalized
+                    });
 
                     // Store Data for Bill
                     PAYMENT_DATA.finalPaid = netPayable;
@@ -3761,8 +3886,10 @@ async function deletePendingOrder(orderId) {
                 document.getElementById('billSerial').innerText = PAYMENT_DATA.serial;
                 showToast(`Paid! Earned ${PAYMENT_DATA.bonusEarned} pts`);
 
-                // Deduct blocked stock (moves blocked -> fully consumed)
-                if (PAYMENT_DATA.items) await deductBlockedStock(PAYMENT_DATA.items);
+                // Deduct blocked stock (moves blocked -> fully consumed) — skipped if kitchen already finalized
+                if (PAYMENT_DATA.items && PAYMENT_DATA.shouldDeduct) {
+                    await deductBlockedStock(PAYMENT_DATA.items, PAYMENT_DATA.stockModel);
+                }
             } catch (e) {
                 console.error(e);
                 showToast('Payment Failed: ' + e, 'error');
@@ -4541,74 +4668,195 @@ async function resendCampaign(docId) {
         document.getElementById('notifTitle').focus();
     }
 }
-// ==================== INVENTORY MANAGEMENT ====================
+// ==================== INVENTORY MANAGEMENT (Dynamic Recipe System) ====================
 
 // Helper: deduct/block/release ingredient stock
-async function adjustIngredientStock(items, action) {
-    // action: 'block' (order placed), 'release' (cancelled), 'deduct' (payment done), 'restore' (completed order deleted)
-    // Uses Firestore increment() for ATOMIC updates — eliminates read-modify-write race conditions
-    const { collection, getDocs, doc, updateDoc, increment } = window.firebaseModules;
+// Uses embedded recipe array in menu doc — NO subcollection reads needed
+// stock = total on-hand stock. blockedStock = reserved quantity for unpaid/pending orders.
+// legacy-block-deducted is for pending orders created by the old double-counting block logic.
 
-    // Load recipes for all unique menu items
-    const itemIds = [...new Set(items.map(i => i.id))];
-    const allRecipes = {};
-    for (const itemId of itemIds) {
-        const recipeSnap = await getDocs(collection(window.db, `menu/${itemId}/recipe`));
-        allRecipes[itemId] = [];
-        recipeSnap.forEach(d => {
-            allRecipes[itemId].push({ ingId: d.id, qty: d.data().qty });
-        });
-    }
+// Returns {field: signedQty} deltas for a given action — used for apply AND rollback
+function buildStockDelta(action, qty, isLegacy) {
+    if (action === 'block')   return { blockedStock: qty };
+    if (action === 'release') return isLegacy ? { stock: qty, blockedStock: -qty } : { blockedStock: -qty };
+    if (action === 'deduct')  return isLegacy ? { blockedStock: -qty } : { stock: -qty, blockedStock: -qty };
+    if (action === 'restore') return { stock: qty };
+    return {};
+}
 
-    // Build usage map: ingId -> total qty for this order
+async function adjustIngredientStock(items, action, stockModel = 'reserved-v2') {
+    const { doc, updateDoc, increment, getDoc } = window.firebaseModules;
+
     const usageMap = {};
-    for (const orderItem of items) {
-        const recipe = allRecipes[orderItem.id] || [];
-        for (const ri of recipe) {
-            if (!ri.ingId || !ri.qty) continue;
-            usageMap[ri.ingId] = (usageMap[ri.ingId] || 0) + (ri.qty * orderItem.qty);
+    const itemsWithoutRecipe = [];
+
+    for (const orderItem of (items || [])) {
+        let recipeSteps = null;
+        const itemId = orderItem.id || orderItem.itemId;
+        // 1st choice: recipe snapshot embedded in the order item itself (frozen at order time —
+        // guarantees release/deduct mirror exactly what was blocked, even if recipes changed since)
+        if (Array.isArray(orderItem.recipe) && orderItem.recipe.length > 0) {
+            recipeSteps = orderItem.recipe;
+        } else {
+            const menuItem = STATE.menu.find(m => m.id === itemId);
+            if (menuItem && Array.isArray(menuItem.recipe) && menuItem.recipe.length > 0) {
+                recipeSteps = menuItem.recipe;
+            } else if (itemId) {
+                // Fallback: fetch fresh from Firestore (covers stale local cache)
+                try {
+                    const mSnap = await getDoc(doc(window.db, 'menu', itemId));
+                    if (mSnap.exists() && Array.isArray(mSnap.data().recipe) && mSnap.data().recipe.length > 0) {
+                        recipeSteps = mSnap.data().recipe;
+                    }
+                } catch(e) { console.error(`Recipe fetch failed for menu/${itemId}:`, e.message); }
+            }
+        }
+
+        if (!recipeSteps) {
+            itemsWithoutRecipe.push(orderItem.name || itemId || '(unknown item)');
+            continue;
+        }
+
+        for (const step of recipeSteps) {
+            const ingId = step.ingId;
+            const recipeQty = Number(step.qty) || 0;
+            const orderQty = Number(orderItem.qty) || 0;
+            if (!ingId || recipeQty <= 0 || orderQty <= 0) {
+                console.warn(`⚠️ Invalid recipe step skipped on "${orderItem.name}":`, step);
+                continue;
+            }
+            usageMap[ingId] = (usageMap[ingId] || 0) + (recipeQty * orderQty);
         }
     }
 
-    if (Object.keys(usageMap).length === 0) return; // No recipes configured, skip
-
-    // Apply atomic increments — no read needed, no race condition possible
-    const updatePromises = Object.entries(usageMap).map(([ingId, qty]) => {
-        const ingRef = doc(window.db, 'ingredients', ingId);
-        let update = {};
-
-        if (action === 'block') {
-            // Deduct from available stock, add to blocked counter
-            update = { stock: increment(-qty), blockedStock: increment(qty) };
-        } else if (action === 'release') {
-            // Return to available stock, subtract from blocked counter
-            update = { stock: increment(qty), blockedStock: increment(-qty) };
-        } else if (action === 'deduct') {
-            // Stock was already reduced at block-time; just clear the blocked counter
-            update = { blockedStock: increment(-qty) };
-        } else if (action === 'restore') {
-            // Completed order was deleted: put consumed stock back
-            update = { stock: increment(qty) };
+    // ── DIAGNOSTICS: never fail silently ──
+    if (itemsWithoutRecipe.length > 0) {
+        console.warn(`⚠️ No embedded recipe found for: ${itemsWithoutRecipe.join(', ')}. ` +
+            `Recipes must be set in Admin → Inventory → Recipe Builder (new system ignores the old menu/{id}/recipe subcollection).`);
+        if (action === 'block' && typeof showToast === 'function') {
+            showToast(`⚠️ No recipe set for: ${itemsWithoutRecipe.slice(0,2).join(', ')}${itemsWithoutRecipe.length>2?'…':''} — stock not blocked`, 'warning');
         }
+    }
 
-        return updateDoc(ingRef, update).catch(e => console.error(`Stock update failed for ${ingId}:`, e));
+    if (Object.keys(usageMap).length === 0) {
+        console.warn(`ℹ️ Stock '${action}' skipped — no valid recipe steps resolved for this order.`);
+        return false;
+    }
+
+    console.log(`📦 Stock '${action}' (${stockModel}) applying:`, usageMap);
+
+    const isLegacy = stockModel !== 'reserved-v2';
+    const entries = Object.entries(usageMap);
+
+    // Apply all updates; track which succeeded so we can roll back on partial failure
+    const results = await Promise.allSettled(entries.map(([ingId, qty]) => {
+        const deltas = buildStockDelta(action, qty, isLegacy);
+        const update = {};
+        for (const [field, d] of Object.entries(deltas)) update[field] = increment(d);
+        return updateDoc(doc(window.db, 'ingredients', ingId), update);
+    }));
+
+    const failed = [];
+    const succeeded = [];
+    results.forEach((r, i) => {
+        if (r.status === 'rejected') failed.push({ ingId: entries[i][0], qty: entries[i][1], reason: r.reason?.message || r.reason });
+        else succeeded.push({ ingId: entries[i][0], qty: entries[i][1] });
     });
 
-    await Promise.all(updatePromises);
+    if (failed.length > 0) {
+        console.error(`❌ Stock '${action}' failed for ingredient ID(s): ` +
+            failed.map(f => `${f.ingId} (${f.reason})`).join('; ') +
+            `. If the ID looks like a name-slug (e.g. "raw_crispy_chicken"), that recipe step was saved by the old builder — remove and re-add it in Recipe Builder.`);
+
+        // Roll back the increments that DID succeed, so counters stay consistent
+        if (succeeded.length > 0) {
+            await Promise.allSettled(succeeded.map(({ ingId, qty }) => {
+                const deltas = buildStockDelta(action, qty, isLegacy);
+                const inverse = {};
+                for (const [field, d] of Object.entries(deltas)) inverse[field] = increment(-d);
+                return updateDoc(doc(window.db, 'ingredients', ingId), inverse);
+            }));
+            console.warn('↩️ Rolled back partial stock updates to keep counters consistent.');
+        }
+
+        if (typeof showToast === 'function') {
+            showToast(`⚠️ Stock ${action} failed — broken recipe link. Check Recipe Builder.`, 'error');
+        }
+        return false;
+    }
+
+    return true;
 }
 
 // Standalone wrapper functions
 async function blockIngredientStock(items) {
-    try { await adjustIngredientStock(items, 'block'); } catch(e) { console.error('Stock block error:', e); }
+    return adjustIngredientStock(items, 'block', 'reserved-v2');
 }
-async function releaseIngredientStock(items) {
-    try { await adjustIngredientStock(items, 'release'); } catch(e) { console.error('Stock release error:', e); }
+async function releaseIngredientStock(items, stockModel = 'reserved-v2') {
+    return adjustIngredientStock(items, 'release', stockModel);
 }
 async function restoreIngredientStock(items) {
-    try { await adjustIngredientStock(items, 'restore'); } catch(e) { console.error('Stock restore error:', e); }
+    return adjustIngredientStock(items, 'restore', 'reserved-v2');
 }
-async function deductBlockedStock(items) {
-    try { await adjustIngredientStock(items, 'deduct'); } catch(e) { console.error('Stock deduct error:', e); }
+async function deductBlockedStock(items, stockModel = 'reserved-v2') {
+    return adjustIngredientStock(items, 'deduct', stockModel);
+}
+
+// ---- Admin tool: recompute blockedStock from open orders (heals drift) ----
+// Sets ABSOLUTE blockedStock per ingredient = sum of reservations in orders that are
+// still blocked (stockBlocked == true). Any orphaned blocks from deleted/old orders vanish.
+async function recalcBlockedStock() {
+    if (!confirm('Recalculate blocked quantities from open orders?\n\nThis recomputes "Blocked" for EVERY ingredient based on orders that are currently reserving stock, wiping any leftover phantom blocks from old bugs or deleted orders.')) return;
+
+    const { collection, getDocs, query, where, doc, updateDoc, getDoc } = window.firebaseModules;
+    showToast('🔧 Recalculating blocked stock…');
+
+    try {
+        // 1. All orders still holding a reservation
+        const ordersSnap = await getDocs(query(collection(window.db, 'orders'), where('stockBlocked', '==', true)));
+
+        // 2. Sum required blocked qty per ingredient
+        const blockedMap = {}; // ingId -> qty
+        for (const oDoc of ordersSnap.docs) {
+            const order = oDoc.data();
+            for (const orderItem of (order.items || [])) {
+                let recipeSteps = null;
+                if (Array.isArray(orderItem.recipe) && orderItem.recipe.length > 0) {
+                    recipeSteps = orderItem.recipe;
+                } else {
+                    const menuItem = STATE.menu.find(m => m.id === (orderItem.id || orderItem.itemId));
+                    if (menuItem && Array.isArray(menuItem.recipe)) recipeSteps = menuItem.recipe;
+                }
+                if (!recipeSteps) continue;
+                for (const step of recipeSteps) {
+                    const rq = Number(step.qty) || 0, oq = Number(orderItem.qty) || 0;
+                    if (!step.ingId || rq <= 0 || oq <= 0) continue;
+                    blockedMap[step.ingId] = (blockedMap[step.ingId] || 0) + rq * oq;
+                }
+            }
+        }
+
+        // 3. Write absolute blockedStock to EVERY ingredient (0 where no open reservation)
+        const ingSnap = await getDocs(collection(window.db, 'ingredients'));
+        let fixedCount = 0;
+        for (const iDoc of ingSnap.docs) {
+            const correct = blockedMap[iDoc.id] || 0;
+            const current = Number(iDoc.data().blockedStock) || 0;
+            if (current !== correct) {
+                await updateDoc(doc(window.db, 'ingredients', iDoc.id), { blockedStock: correct });
+                console.log(`🔧 ${iDoc.data().name}: blockedStock ${current} → ${correct}`);
+                fixedCount++;
+            }
+        }
+
+        showToast(fixedCount > 0
+            ? `✅ Fixed blocked quantity on ${fixedCount} ingredient${fixedCount !== 1 ? 's' : ''} (from ${ordersSnap.size} open order${ordersSnap.size !== 1 ? 's' : ''})`
+            : '✅ All blocked quantities already correct', 'success');
+        loadAdminIngredients();
+    } catch(e) {
+        showToast('Recalc error: ' + e.message, 'error');
+        console.error('Recalc failed:', e);
+    }
 }
 
 
@@ -4625,14 +4873,15 @@ async function loadAdminIngredients() {
         const ing = d.data();
         const blocked = ing.blockedStock || 0;
         const available = (ing.stock || 0) - blocked;
+        const stockColor = available < 5 ? 'var(--danger)' : available < 20 ? 'var(--warning)' : 'var(--success)';
         return `
         <div class="card" style="background:rgba(15,39,68,0.90); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
             <div>
                 <div style="font-weight:bold; font-size:1rem;">${ing.name}</div>
-                <div style="font-size:0.8rem; color:var(--text-muted);">
-                    Total: <strong style="color:var(--text)">${ing.stock || 0} ${ing.unit}</strong> &nbsp;|&nbsp;
+                <div style="font-size:0.78rem; color:var(--text-muted);">
+                    Total: <strong style="color:${stockColor}">${ing.stock || 0} ${ing.unit}</strong> &nbsp;|&nbsp;
                     Blocked: <strong style="color:var(--warning)">${blocked} ${ing.unit}</strong> &nbsp;|&nbsp;
-                    Available: <strong style="color:var(--success)">${available.toFixed(2)} ${ing.unit}</strong>
+                    Available: <strong style="color:${stockColor}">${available.toFixed(2)} ${ing.unit}</strong>
                 </div>
             </div>
             <div class="flex gap-2">
@@ -4673,7 +4922,7 @@ async function saveIngredient() {
 
     if (!name) return showToast('Please enter ingredient name', 'error');
 
-    const { collection, addDoc, doc, updateDoc, setDoc } = window.firebaseModules;
+    const { collection, addDoc, doc, updateDoc } = window.firebaseModules;
     try {
         if (id) {
             await updateDoc(doc(window.db, 'ingredients', id), { name, stock, unit });
@@ -4683,13 +4932,13 @@ async function saveIngredient() {
         document.getElementById('addIngredientModal').classList.add('hidden');
         showToast('Ingredient saved!');
         loadAdminIngredients();
-        loadRecipeIngredientDropdown();
+        loadRecipeIngredientDropdown(); // keep recipe dropdown in sync
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
 async function deleteIngredient(id) {
-    if (!confirm('Delete this ingredient? It will also be removed from all recipes.')) return;
-    const { doc, deleteDoc, collection, getDocs, query, collectionGroup } = window.firebaseModules;
+    if (!confirm('Delete this ingredient?')) return;
+    const { doc, deleteDoc } = window.firebaseModules;
     try {
         await deleteDoc(doc(window.db, 'ingredients', id));
         showToast('Ingredient deleted');
@@ -4697,19 +4946,42 @@ async function deleteIngredient(id) {
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
-// ---- Admin: Recipe Management ----
-async function loadRecipeItemDropdown() {
+// ---- Admin: Dynamic Recipe Builder ----
+
+function loadRecipeItemDropdown() {
     const sel = document.getElementById('recipeItemSelect');
-    sel.innerHTML = '<option value="">-- Select an item --</option>' +
+    if (!sel) return;
+    sel.innerHTML = '<option value="">-- Select a menu item --</option>' +
         STATE.menu.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
 }
 
+// Populate ingredient dropdown from Firestore — called when tab opens or after saving a new ingredient
+// Global cache of ingredients: { docId: { name, unit } } — used for link validation & migration
+let INGREDIENTS_CACHE = {};
+
 async function loadRecipeIngredientDropdown() {
     const { collection, getDocs, query, orderBy } = window.firebaseModules;
-    const snap = await getDocs(query(collection(window.db, 'ingredients'), orderBy('name')));
-    const sel = document.getElementById('recipeAddIngredientSelect');
-    sel.innerHTML = '<option value="">-- Add Ingredient --</option>' +
-        snap.docs.map(d => `<option value="${d.id}">${d.data().name} (${d.data().unit})</option>`).join('');
+    try {
+        const snap = await getDocs(query(collection(window.db, 'ingredients'), orderBy('name')));
+        INGREDIENTS_CACHE = {};
+        snap.forEach(d => { INGREDIENTS_CACHE[d.id] = { name: d.data().name, unit: d.data().unit || '' }; });
+
+        const sel = document.getElementById('recipeIngSelect');
+        if (!sel) return;
+        // Store unit as data-attribute on each option for auto-fill
+        sel.innerHTML = '<option value="">-- Select ingredient --</option>' +
+            snap.docs.map(d => {
+                const ing = d.data();
+                return `<option value="${d.id}" data-unit="${ing.unit || ''}" data-name="${ing.name}">${ing.name} (${ing.unit || '—'})</option>`;
+            }).join('');
+    } catch(e) { console.error('Failed to load ingredient dropdown:', e); }
+}
+
+// Auto-fill unit when ingredient is selected
+function onRecipeIngChange(sel) {
+    const opt = sel.options[sel.selectedIndex];
+    const unit = opt ? (opt.dataset.unit || '') : '';
+    document.getElementById('recipeAddUnit').value = unit;
 }
 
 async function loadItemRecipe(itemId) {
@@ -4717,64 +4989,170 @@ async function loadItemRecipe(itemId) {
     if (!itemId) { sec.classList.add('hidden'); return; }
     sec.classList.remove('hidden');
 
-    const { collection, getDocs } = window.firebaseModules;
-    const snap = await getDocs(collection(window.db, `menu/${itemId}/recipe`));
-    
+    const { doc, getDoc } = window.firebaseModules;
+    let recipe = [];
+    try {
+        const snap = await getDoc(doc(window.db, 'menu', itemId));
+        if (snap.exists()) {
+            recipe = snap.data().recipe || [];
+        }
+    } catch(e) { showToast('Error loading recipe: ' + e.message, 'error'); return; }
+
     const container = document.getElementById('recipeIngredientsList');
-    if (snap.empty) {
-        container.innerHTML = '<p class="text-muted" style="font-size:0.85rem; margin-bottom:10px;">No ingredients assigned yet.</p>';
+    if (recipe.length === 0) {
+        container.innerHTML = `
+            <div style="background:rgba(0,212,255,0.05); border:1px dashed rgba(0,212,255,0.2); border-radius:8px; padding:12px; text-align:center;">
+                <div style="font-size:1.5rem; margin-bottom:6px;">📋</div>
+                <div style="color:var(--text-muted); font-size:0.85rem;">No recipe steps yet. Add the first prep step below.</div>
+            </div>`;
         return;
     }
 
-    // Load ingredient names
-    const { doc, getDoc } = window.firebaseModules;
-    let html = '';
-    for (const d of snap.docs) {
-        const r = d.data();
-        let ingName = r.ingredientId || d.id;
-        try {
-            const ingDoc = await getDoc(doc(window.db, 'ingredients', d.id));
-            if (ingDoc.exists()) ingName = ingDoc.data().name;
-        } catch(e) {}
-        html += `
-        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(15,39,68,0.90); padding:8px; border-radius:6px; margin-bottom:6px;">
-            <span style="font-size:0.9rem;">${ingName}</span>
-            <div style="display:flex; align-items:center; gap:8px;">
-                <span style="color:var(--primary); font-weight:bold;">${r.qty} ${r.unit}</span>
-                <button class="btn btn-danger btn-sm" onclick="removeRecipeIngredient('${itemId}', '${d.id}')">🗑️</button>
+    const stationEmoji = { 'Fryer':'🔥', 'Pizza Oven':'🍕', 'Beverage':'🥤', 'Assembly':'🥗', 'Grill':'🍖', 'Tandoor':'🫓' };
+    const cacheReady = Object.keys(INGREDIENTS_CACHE).length > 0;
+    container.innerHTML = recipe.map((step, idx) => {
+        // Detect steps whose ingId doesn't match any ingredient document (e.g. old slug-based steps)
+        const broken = cacheReady && !INGREDIENTS_CACHE[step.ingId];
+        const brokenBadge = broken
+            ? `<span style="background:rgba(255,82,82,0.18); color:var(--danger); border:1px solid rgba(255,82,82,0.4); padding:2px 8px; border-radius:6px; font-size:0.68rem; font-weight:800; margin-left:8px;">⚠️ NOT LINKED — remove &amp; re-add</span>`
+            : '';
+        return `
+        <div style="display:flex; justify-content:space-between; align-items:center;
+                    background:rgba(15,39,68,0.90); padding:10px 12px; border-radius:8px; margin-bottom:6px;
+                    border-left:3px solid ${broken ? 'var(--danger)' : 'var(--primary)'};">
+            <div>
+                <div style="font-weight:700; font-size:0.9rem;">${step.name}${brokenBadge}</div>
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
+                    <span style="color:var(--primary); font-weight:700;">${step.qty} ${step.unit}</span>
+                    &nbsp;·&nbsp;
+                    <span style="color:var(--warning);">${stationEmoji[step.station] || '🏭'} ${step.station}</span>
+                    &nbsp;·&nbsp;
+                    <span style="opacity:0.8;">${step.action}</span>
+                </div>
             </div>
+            <button class="btn btn-danger btn-sm" onclick="removeRecipeStep('${itemId}', ${idx})" style="padding:4px 8px; font-size:0.8rem;">🗑️</button>
         </div>`;
-    }
-    container.innerHTML = html;
+    }).join('');
 }
 
-async function addRecipeIngredient() {
-    const itemId = document.getElementById('recipeItemSelect').value;
-    const ingId = document.getElementById('recipeAddIngredientSelect').value;
-    const qty = parseFloat(document.getElementById('recipeAddQty').value);
-    const unit = document.getElementById('recipeAddUnit').value.trim();
+async function addRecipeStep() {
+    const itemId  = document.getElementById('recipeItemSelect').value;
+    const ingSel  = document.getElementById('recipeIngSelect');
+    const ingId   = ingSel.value;  // Firestore document ID — reliable, no slug needed
+    const ingName = ingSel.options[ingSel.selectedIndex]?.dataset?.name || '';
+    const qty     = parseFloat(document.getElementById('recipeAddQty').value);
+    const unit    = document.getElementById('recipeAddUnit').value.trim();
+    const station = document.getElementById('recipeStation').value;
+    const action  = document.getElementById('recipeAction').value;
 
-    if (!itemId || !ingId || !qty || qty <= 0) return showToast('Fill all fields', 'error');
+    if (!itemId) return showToast('Select a menu item first', 'error');
+    if (!ingId)  return showToast('Select an ingredient', 'error');
+    if (!qty || qty <= 0) return showToast('Enter a valid quantity', 'error');
+    if (!unit)   return showToast('Unit is required', 'error');
 
-    const { doc, setDoc } = window.firebaseModules;
+    const newStep = { ingId, name: ingName, qty, unit, station, action };
+
+    const { doc, updateDoc, arrayUnion } = window.firebaseModules;
     try {
-        await setDoc(doc(window.db, `menu/${itemId}/recipe`, ingId), { qty, unit });
-        showToast('Recipe updated!');
-        document.getElementById('recipeAddIngredientSelect').value = '';
-        document.getElementById('recipeAddQty').value = '';
+        await updateDoc(doc(window.db, 'menu', itemId), { recipe: arrayUnion(newStep) });
+
+        // Update local STATE.menu cache
+        const menuItem = STATE.menu.find(m => m.id === itemId);
+        if (menuItem) {
+            if (!Array.isArray(menuItem.recipe)) menuItem.recipe = [];
+            menuItem.recipe.push(newStep);
+        }
+
+        showToast('✅ Step added to recipe!');
+        ingSel.value = '';
+        document.getElementById('recipeAddQty').value  = '';
         document.getElementById('recipeAddUnit').value = '';
         loadItemRecipe(itemId);
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
-async function removeRecipeIngredient(itemId, ingId) {
-    if (!confirm('Remove this ingredient from recipe?')) return;
-    const { doc, deleteDoc } = window.firebaseModules;
+async function removeRecipeStep(itemId, stepIndex) {
+    if (!confirm('Remove this prep step from the recipe?')) return;
+
+    const { doc, updateDoc, getDoc } = window.firebaseModules;
     try {
-        await deleteDoc(doc(window.db, `menu/${itemId}/recipe`, ingId));
-        showToast('Removed');
+        const snap = await getDoc(doc(window.db, 'menu', itemId));
+        if (!snap.exists()) return;
+        const recipe = snap.data().recipe || [];
+        recipe.splice(stepIndex, 1);
+        await updateDoc(doc(window.db, 'menu', itemId), { recipe });
+
+        // Update local STATE.menu cache
+        const menuItem = STATE.menu.find(m => m.id === itemId);
+        if (menuItem && Array.isArray(menuItem.recipe)) {
+            menuItem.recipe.splice(stepIndex, 1);
+        }
+
+        showToast('Step removed');
         loadItemRecipe(itemId);
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ---- One-time migration: old subcollection recipes → embedded recipe array ----
+// The old system stored recipes at menu/{itemId}/recipe/{ingredientDocId} with {qty, unit}.
+// The new system reads ONLY the embedded 'recipe' array on the menu document.
+// This imports the old data, defaulting station/action — review each item afterwards.
+async function migrateLegacyRecipes() {
+    if (!confirm('Import recipes from the OLD system (menu subcollections) into the new Recipe Builder?\n\n• Items that already have new recipes are skipped\n• Imported steps default to Station: Assembly, Action: Prepare — review and adjust them after import')) return;
+
+    const { collection, getDocs, doc, updateDoc } = window.firebaseModules;
+
+    // Make sure ingredient names are available for mapping
+    if (Object.keys(INGREDIENTS_CACHE).length === 0) await loadRecipeIngredientDropdown();
+
+    let migrated = 0, skippedHasNew = 0, skippedEmpty = 0, brokenLinks = 0;
+    showToast('♻️ Scanning old recipes…');
+
+    try {
+        for (const item of STATE.menu) {
+            // Don't overwrite items already configured in the new system
+            if (Array.isArray(item.recipe) && item.recipe.length > 0) { skippedHasNew++; continue; }
+
+            const legacySnap = await getDocs(collection(window.db, `menu/${item.id}/recipe`));
+            if (legacySnap.empty) { skippedEmpty++; continue; }
+
+            const steps = [];
+            legacySnap.forEach(d => {
+                const r = d.data();
+                const ing = INGREDIENTS_CACHE[d.id]; // old subcollection doc ID = ingredient doc ID
+                if (!ing) { brokenLinks++; console.warn(`Skipping legacy step on "${item.name}": ingredient doc '${d.id}' no longer exists`); return; }
+                steps.push({
+                    ingId: d.id,
+                    name: ing.name,
+                    qty: Number(r.qty) || 0,
+                    unit: r.unit || ing.unit || 'pcs',
+                    station: 'Assembly',   // default — adjust per item after import
+                    action: 'Prepare'      // default — adjust per item after import
+                });
+            });
+
+            if (steps.length === 0) { skippedEmpty++; continue; }
+
+            await updateDoc(doc(window.db, 'menu', item.id), { recipe: steps });
+            const local = STATE.menu.find(m => m.id === item.id);
+            if (local) local.recipe = steps;
+            migrated++;
+        }
+
+        let msg = `✅ Imported recipes for ${migrated} item${migrated !== 1 ? 's' : ''}.`;
+        if (skippedHasNew) msg += ` ${skippedHasNew} already had new recipes.`;
+        if (brokenLinks)   msg += ` ${brokenLinks} old step(s) skipped (ingredient deleted).`;
+        showToast(msg, migrated > 0 ? 'success' : 'warning');
+        console.log(`♻️ Migration done — migrated: ${migrated}, already-new: ${skippedHasNew}, no-old-data: ${skippedEmpty}, broken: ${brokenLinks}`);
+        console.log('👉 Next: open each migrated item in the Recipe Builder and set the correct Station (Fryer/Pizza Oven/…) and Action (Fry/Bake/…) — imports default to Assembly/Prepare.');
+
+        // Refresh the builder view if an item is selected
+        const sel = document.getElementById('recipeItemSelect');
+        if (sel && sel.value) loadItemRecipe(sel.value);
+    } catch(e) {
+        showToast('Migration error: ' + e.message, 'error');
+        console.error('Migration failed:', e);
+    }
 }
 
 // ---- Outlet: Stock View ----
@@ -4821,9 +5199,15 @@ async function saveOutletStock(ingId, unit) {
     const newStock = parseFloat(document.getElementById(`stockEdit_${ingId}`).value);
     if (isNaN(newStock) || newStock < 0) return showToast('Invalid stock value', 'error');
     
-    const { doc, updateDoc } = window.firebaseModules;
+    const { doc, getDoc, updateDoc } = window.firebaseModules;
     try {
-        await updateDoc(doc(window.db, 'ingredients', ingId), { stock: newStock });
+        const ingRef = doc(window.db, 'ingredients', ingId);
+        const snap = await getDoc(ingRef);
+        const blocked = snap.exists() ? (Number(snap.data().blockedStock) || 0) : 0;
+        if (newStock < blocked) {
+            return showToast(`Stock cannot be less than blocked quantity (${blocked} ${unit})`, 'error');
+        }
+        await updateDoc(ingRef, { stock: newStock });
         showToast('Stock updated!');
         loadStockView();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
