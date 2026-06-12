@@ -626,11 +626,11 @@ async function trackUserActivity(phone) {
     <div class="card" style="margin: 15px 0; padding: 15px;">
         <div class="grid-2" style="margin-bottom: 10px;">
             <div>
-                <label class="text-muted" style="font-size: 0.8rem;">Start Date</label>
+                <label class="text-muted" style="font-size: 0.8rem;">Date</label>
                 <input type="date" id="historyStart" class="input">
             </div>
             <div>
-                <label class="text-muted" style="font-size: 0.8rem;">End Date</label>
+                <label class="text-muted" style="font-size: 0.8rem;">End Date (optional)</label>
                 <input type="date" id="historyEnd" class="input">
             </div>
         </div>
@@ -3091,9 +3091,10 @@ function filterMenu(text) {
 
 async function searchHistory() {
     const startVal = document.getElementById('historyStart').value;
-    const endVal = document.getElementById('historyEnd').value;
+    // End date optional: leave blank to search that single day
+    const endVal = document.getElementById('historyEnd').value || startVal;
     
-    if(!startVal || !endVal) return showToast('Please select both dates', 'error');
+    if(!startVal) return showToast('Please select a date', 'error');
 
     const startDate = new Date(startVal);
     const endDate = new Date(endVal);
@@ -3140,17 +3141,31 @@ async function searchHistory() {
             // Source
             const srcLabel = o.orderSource === 'customer' ? '📱' : '🖥️';
 
+            // Bill send buttons + "sent" indicators (completed orders only)
+            const waBadge = `<span id="billsent-${o.id}-whatsapp" style="background:#25D366; color:#000; padding:2px 7px; border-radius:3px; font-size:0.65rem; font-weight:bold; ${o.billSentWA ? '' : 'display:none;'}">✅ WA Sent</span>`;
+            const smsBadge = `<span id="billsent-${o.id}-sms" style="background:#00B4FF; color:#000; padding:2px 7px; border-radius:3px; font-size:0.65rem; font-weight:bold; ${o.billSentSMS ? '' : 'display:none;'}">✅ SMS Sent</span>`;
+            const sendRow = o.status === 'completed' ? `
+                <div class="flex gap-2" style="margin-top:10px; align-items:center; flex-wrap:wrap; border-top:1px solid rgba(255,255,255,0.08); padding-top:8px;">
+                    <button class="btn btn-success btn-sm" style="background:#25D366; border:none; color:#000;" onclick="event.stopPropagation(); sendBillFromHistory('${o.phone}', '${o.id}', 'whatsapp')">📱 WA Bill</button>
+                    <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); sendBillFromHistory('${o.phone}', '${o.id}', 'sms')">💬 SMS Bill</button>
+                    ${waBadge}
+                    ${smsBadge}
+                </div>` : '';
+
             return `
-            <div class="order-card" onclick="viewOrderDetails('${o.id}')" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
-                <div>
-                    <div style="font-weight:bold; font-size:1.1rem;">${srcLabel} ${o.customerName || o.phone}</div>
-                    <div class="text-muted" style="font-size:0.85rem;">${dateStr} • <span style="color:${statusColor}">${o.status.toUpperCase()}</span>${kotBadge}</div>
-                    <div class="text-muted" style="font-size:0.8rem;">₹${o.total} • ${o.paymentMode || 'Cash'}</div>
+            <div class="order-card" onclick="viewOrderDetails('${o.id}')" style="cursor:pointer;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <div style="font-weight:bold; font-size:1.1rem;">${srcLabel} ${o.customerName || o.phone}</div>
+                        <div class="text-muted" style="font-size:0.85rem;">${dateStr} • <span style="color:${statusColor}">${o.status.toUpperCase()}</span>${kotBadge}</div>
+                        <div class="text-muted" style="font-size:0.8rem;">₹${o.total} • ${o.paymentMode || 'Cash'}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-weight:bold; font-size:1.2rem;">₹${o.total}</div>
+                        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); adminDeleteOrder('${o.id}')" style="margin-top:5px;">🗑️</button>
+                    </div>
                 </div>
-                <div style="text-align:right;">
-                    <div style="font-weight:bold; font-size:1.2rem;">₹${o.total}</div>
-                    <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); adminDeleteOrder('${o.id}')" style="margin-top:5px;">🗑️</button>
-                </div>
+                ${sendRow}
             </div>
         `;}).join('');
 
@@ -3393,6 +3408,7 @@ function printKOT(orderId) {
                     // Load data into global state so sendBill() can read it
                     PAYMENT_DATA = { 
                         ...data, 
+                        orderId: orderId,
                         serial: data.timestamp ? data.timestamp.toMillis().toString().slice(-4) : '0000', 
                         bonusEarned: data.bonusEarned || 0, 
                         finalPaid: data.finalPaid || data.total, 
@@ -3896,6 +3912,24 @@ async function deletePendingOrder(orderId) {
             }
         }
 
+        // --- BILL SENT TRACKER ---
+        // Records on the order document that a bill was sent (WA/SMS),
+        // so the Admin panel can show a "sent" indicator.
+        async function markBillSent(orderId, type) {
+            if (!orderId) return;
+            // Instant UI feedback if the badge is on screen (admin order list)
+            const badge = document.getElementById(`billsent-${orderId}-${type}`);
+            if (badge) badge.style.display = '';
+            try {
+                const { doc, updateDoc, serverTimestamp } = window.firebaseModules;
+                const key = type === 'whatsapp' ? 'billSentWA' : 'billSentSMS';
+                await updateDoc(doc(window.db, 'orders', orderId), {
+                    [key]: true,
+                    billSentAt: serverTimestamp()
+                });
+            } catch (e) { console.error('markBillSent failed:', e); }
+        }
+
         function sendBill(type) {
             const s = STATE.storeSettings || { name: 'Juice Therapy Majherhati', address: '', footer: 'Thank you!', link: '' };
             const d = PAYMENT_DATA;
@@ -3940,6 +3974,8 @@ async function deletePendingOrder(orderId) {
                 const shortText = `Bill for ${s.name}: ₹${d.finalPaid} paid. Points earned: ${d.bonusEarned}. Thanks!`;
                 window.open(`sms:${d.phone}?body=${encodeURIComponent(shortText)}`, '_blank');
             }
+            // Record that the bill was sent (shows indicator in Admin panel)
+            markBillSent(d.orderId, type);
         }
 
         // --- CUSTOMER PANEL ---
