@@ -776,6 +776,13 @@ async function trackUserActivity(phone) {
                     <div style="margin-top: 10px;">
                         <input type="tel" id="posPhone" class="input" placeholder="Customer Phone (Auto-create)" maxlength="10">
                     </div>
+                    <div style="margin-top: 8px;">
+                        <label class="text-muted" style="font-size:0.75rem; display:block; margin-bottom:5px;">Order Type</label>
+                        <div class="flex gap-2">
+                            <button id="btnTypeDineIn" class="btn btn-sm btn-primary w-full" onclick="setOrderType('dine-in')">🍽️ Dine-in</button>
+                            <button id="btnTypeDelivery" class="btn btn-sm btn-secondary w-full" onclick="setOrderType('delivery')">🚚 Delivery</button>
+                        </div>
+                    </div>
                     <div class="cart-items" id="cartItemsList"></div>
                     <div style="border-top: 1px solid rgba(0,212,255,0.15); padding-top: 10px;">
                         <!-- Discount Coupon Section -->
@@ -1047,6 +1054,7 @@ async function trackUserActivity(phone) {
             orders: [],
             editingOrderId: null,
             kitchenLockedItems: [], // items locked by kitchen (cannot reduce/remove)
+            orderType: 'dine-in', // 'dine-in' | 'delivery' — set when taking an order
             activeCategory: 'All',
 	    adminActiveCategory: 'All',
             tempPhone: null,
@@ -1057,6 +1065,188 @@ let TEMP_EDIT_ITEMS = [];
 let TEMP_EDIT_DISCOUNT = null; // Store discount info during editing
 let SALES_CHART_INSTANCE = null;
 let isSubmitting = false; // Guard against duplicate order submissions
+
+// ==========================================
+// LOYALTY POINTS — 7-DAY EXPIRY (LOT LEDGER)
+// ==========================================
+// Dine-in orders earn 5% bonus points that expire 7 days after they are earned.
+// Points are tracked as "lots" on the customer document: pointLots = [{ amount, expiresAt(ms) }].
+// The legacy single 'points' field is kept in sync (= sum of non-expired lots) for display.
+const POINT_VALIDITY_DAYS = 7;
+const POINT_LOT_LEGACY_EXPIRY = 4102444800000; // ~Jan 1 2100 — legacy points never expire
+
+// Normalize a lot's expiry to milliseconds (handles number, Firestore Timestamp, or {seconds})
+function lotExpiryMs(lot) {
+    if (!lot || lot.expiresAt == null) return POINT_LOT_LEGACY_EXPIRY;
+    const e = lot.expiresAt;
+    if (typeof e === 'number') return e;
+    if (typeof e.toMillis === 'function') return e.toMillis();
+    if (typeof e.seconds === 'number') return e.seconds * 1000;
+    return POINT_LOT_LEGACY_EXPIRY;
+}
+
+// Returns { lots: [{amount, expiresAt(ms)}], available } from a customer document.
+// Drops expired lots and migrates a legacy single 'points' balance into one non-expiring lot.
+function reconcilePointLots(custData) {
+    const now = Date.now();
+    let lots = (custData && Array.isArray(custData.pointLots)) ? custData.pointLots : null;
+    if (lots === null) {
+        const legacy = (custData && custData.points) || 0;
+        lots = legacy > 0 ? [{ amount: legacy, expiresAt: POINT_LOT_LEGACY_EXPIRY }] : [];
+    }
+    const valid = lots
+        .map(l => ({ amount: l.amount || 0, expiresAt: lotExpiryMs(l) }))
+        .filter(l => l.amount > 0 && l.expiresAt > now);
+    const available = valid.reduce((s, l) => s + l.amount, 0);
+    return { lots: valid, available };
+}
+
+// Consume `redeem` points from lots, earliest-expiring first. Returns new lots array.
+function consumePointLots(validLots, redeem) {
+    const sorted = validLots.slice().sort((a, b) => a.expiresAt - b.expiresAt);
+    let remaining = redeem;
+    for (const lot of sorted) {
+        if (remaining <= 0) break;
+        const take = Math.min(lot.amount, remaining);
+        lot.amount -= take;
+        remaining -= take;
+    }
+    return sorted.filter(l => l.amount > 0);
+}
+
+// Apply a point delta to a customer's lots. delta>0 adds a lot expiring in `validityDays`
+// (default 7); delta<0 consumes earliest-expiring first. Returns new lots array.
+function adjustPointLots(custData, delta, validityDays) {
+    const { lots } = reconcilePointLots(custData);
+    if (delta > 0) {
+        const days = (validityDays == null) ? POINT_VALIDITY_DAYS : validityDays;
+        lots.push({ amount: delta, expiresAt: Date.now() + days * 86400000 });
+        return lots;
+    } else if (delta < 0) {
+        return consumePointLots(lots, -delta);
+    }
+    return lots;
+}
+
+function lotsTotal(lots) {
+    return (lots || []).reduce((s, l) => s + (l.amount || 0), 0);
+}
+
+// Strip lots down to plain storable values for Firestore.
+function serializeLots(lots) {
+    return (lots || []).map(l => ({ amount: l.amount, expiresAt: l.expiresAt }));
+}
+
+// ==========================================
+// ORDER TYPE / PARCEL HELPERS
+// ==========================================
+// Sets the dine-in / delivery mode for the order currently being built in the POS cart.
+function setOrderType(type) {
+    STATE.orderType = (type === 'delivery') ? 'delivery' : 'dine-in';
+    if (STATE.orderType === 'delivery') {
+        // Delivery is fully "to go" — clear any per-item parcel split.
+        STATE.cart.forEach(it => { it.parcelQty = 0; });
+    }
+    updateOrderTypeButtons();
+    renderActiveCart();
+}
+
+function updateOrderTypeButtons() {
+    const btnDine = document.getElementById('btnTypeDineIn');
+    const btnDelivery = document.getElementById('btnTypeDelivery');
+    if (!btnDine || !btnDelivery) return;
+    const isDelivery = STATE.orderType === 'delivery';
+    btnDine.classList.toggle('btn-primary', !isDelivery);
+    btnDine.classList.toggle('btn-secondary', isDelivery);
+    btnDelivery.classList.toggle('btn-primary', isDelivery);
+    btnDelivery.classList.toggle('btn-secondary', !isDelivery);
+}
+
+// Move one unit of an item between dine-in and parcel (dine-in orders only).
+// delta = +1 marks one more unit as parcel, -1 marks one fewer unit as parcel.
+function setItemParcel(itemId, delta) {
+    const item = STATE.cart.find(c => c.id === itemId);
+    if (!item) return;
+    let parcel = item.parcelQty || 0;
+    parcel += delta;
+    if (parcel < 0) parcel = 0;
+    if (parcel > item.qty) parcel = item.qty;
+    item.parcelQty = parcel;
+    renderActiveCart();
+}
+
+// Splits an item into printable segments based on order type and parcel split.
+// Returns [{ qty, tag }] where tag is 'DINE-IN' | 'PARCEL' | 'DELIVERY'.
+function itemServeSegments(item, orderType) {
+    const total = item.qty || 0;
+    if (orderType === 'delivery') return [{ qty: total, tag: 'DELIVERY' }];
+    const parcel = Math.min(item.parcelQty || 0, total);
+    const dine = total - parcel;
+    const segs = [];
+    if (dine > 0) segs.push({ qty: dine, tag: 'DINE-IN' });
+    if (parcel > 0) segs.push({ qty: parcel, tag: 'PARCEL' });
+    if (segs.length === 0) segs.push({ qty: total, tag: 'DINE-IN' });
+    return segs;
+}
+
+// Short human label for an order's type.
+function orderTypeLabel(orderType) {
+    return orderType === 'delivery' ? '🚚 Delivery' : '🍽️ Dine-in';
+}
+
+// ==========================================
+// PREP-TIME HELPERS (read kitchen timing written by the KOT app)
+// ==========================================
+// Normalize any Firestore timestamp/number to milliseconds.
+function tsMillis(ts) {
+    if (ts == null) return null;
+    if (typeof ts === 'number') return ts;
+    if (typeof ts.toMillis === 'function') return ts.toMillis();
+    if (typeof ts.toDate === 'function') return ts.toDate().getTime();
+    if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+    return null;
+}
+
+// Human-friendly duration: "45s", "3m 20s", "1h 5m".
+function fmtDuration(ms) {
+    if (ms == null || isNaN(ms) || ms < 0) return '—';
+    const totalSec = Math.floor(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    if (m === 0) return `${s}s`;
+    if (m < 60) return `${m}m ${s}s`;
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
+}
+
+// Absolute clock time HH:MM for a timestamp, or '—' if missing.
+function fmtClock(ms) {
+    if (ms == null) return '—';
+    return new Date(ms).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+}
+
+// Compute wait / prep / total durations for an order from its lifecycle timestamps.
+// prepStartedAt and kotCompletedAt are written by the KOT (Kitchen Display) app.
+function prepDurations(order) {
+    const placed  = tsMillis(order.timestamp);
+    const started = tsMillis(order.prepStartedAt);
+    const ready   = tsMillis(order.kotCompletedAt);
+    return {
+        placed, started, ready,
+        waitMs:  (placed != null && started != null) ? started - placed : null,  // queue wait
+        prepMs:  (started != null && ready != null)  ? ready - started  : null,  // cook time
+        totalMs: (placed != null && ready != null)   ? ready - placed   : null   // placed → ready
+    };
+}
+
+// Compact one-line prep-time summary for list cards. Returns '' if no timing yet.
+function prepSummaryLine(order) {
+    const { prepMs, totalMs } = prepDurations(order);
+    if (prepMs == null && totalMs == null) return '';
+    return `<div class="text-muted" style="font-size:0.78rem; color:#FF9500;">⏱ Prep: ${fmtDuration(prepMs)} • Total: ${fmtDuration(totalMs)}</div>`;
+}
+
+
         window.onload = () => {
            
             const checkFirebase = setInterval(() => {
@@ -1224,7 +1414,16 @@ async function restoreCustomerSession(phone) {
             STATE.user = { uid: phone, phone: phone, name: data.name };
             STATE.role = 'customer';
             document.getElementById('custNameDisplay').innerText = data.name;
-            document.getElementById('custPoints').innerText = data.points || 0;
+            // Show only non-expired points; lazily persist if some have expired since last sync.
+            const { lots, available } = reconcilePointLots(data);
+            document.getElementById('custPoints').innerText = available;
+            if (available < (data.points || 0)) {
+                const { doc, updateDoc } = window.firebaseModules;
+                updateDoc(doc(window.db, 'customers', phone), {
+                    points: available,
+                    pointLots: serializeLots(lots)
+                }).catch(e => console.error('Points reconcile write failed:', e));
+            }
             trackUserActivity(phone);
             loadCategories();
             loadMenu();
@@ -2081,6 +2280,7 @@ function renderSalesChart(dailyData) {
                             <div style="font-weight:bold; font-size:1.1rem;">${o.customerName || o.phone}</div>
                             <div class="text-muted" style="font-size:0.85rem;">${dateStr} • ₹${o.total} • ${o.paymentMode || 'Cash'}</div>
                             <div class="text-muted" style="font-size:0.8rem;">${o.items.length} Items${hasDiscount ? ' • Discount Applied' : ''}</div>
+                            ${prepSummaryLine(o)}
                         </div>
                         <div>
                             <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); adminDeleteOrder('${o.id}')">Delete</button>
@@ -2112,13 +2312,17 @@ function renderSalesChart(dailyData) {
                     
                     // 2. Adjust Customer Points if order was completed
                     if (orderData.status === 'completed' && orderData.phone) {
-                        const bonus = Math.floor(orderData.total * 0.05);
-                        const custRef = doc(window.db, 'customers', orderData.phone);
-                        const custDoc = await transaction.get(custRef);
-                        
-                        if (custDoc.exists()) {
-                            const currentPoints = custDoc.data().points || 0;
-                            transaction.update(custRef, { points: currentPoints - bonus });
+                        // Reverse the points actually awarded (delivery orders award 0)
+                        const bonus = (orderData.bonusEarned !== undefined)
+                            ? orderData.bonusEarned
+                            : Math.floor((orderData.total || 0) * 0.05);
+                        if (bonus > 0) {
+                            const custRef = doc(window.db, 'customers', orderData.phone);
+                            const custDoc = await transaction.get(custRef);
+                            if (custDoc.exists()) {
+                                const newLots = adjustPointLots(custDoc.data(), -bonus);
+                                transaction.update(custRef, { points: lotsTotal(newLots), pointLots: serializeLots(newLots) });
+                            }
                         }
                     }
                     
@@ -2179,12 +2383,17 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             document.getElementById('editCustPhone').value = data.phone || '';
             
             // Populate Items
-            const itemsHtml = data.items.map(i => `
+            const itemsHtml = data.items.map(i => {
+                const parcelNote = (data.orderType !== 'delivery' && i.parcelQty > 0)
+                    ? ` <span style="color:#FF9500; font-size:0.75rem;">(📦 ${i.parcelQty} parcel)</span>`
+                    : '';
+                return `
                 <div class="flex justify-between" style="font-size:0.9rem; margin-bottom:4px;">
-                    <span>${i.qty} x ${i.name}</span>
+                    <span>${i.qty} x ${i.name}${parcelNote}</span>
                     <span>₹${i.price * i.qty}</span>
                 </div>
-            `).join('');
+            `;
+            }).join('');
             
             // Add discount info if present
             let discountHtml = '';
@@ -2220,11 +2429,32 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
                 kotHtml = `<div style="background:rgba(107,140,174,0.1); border:1px solid rgba(107,140,174,0.3); padding:8px; border-radius:6px; margin-top:8px; font-size:0.85rem; color:var(--text-muted);">⏳ Kitchen Status: QUEUED</div>`;
             }
 
+            // Kitchen prep-time breakdown (timestamps written by the KOT app)
+            const pd = prepDurations(data);
+            let timingHtml = '';
+            if (pd.started != null || pd.ready != null) {
+                timingHtml = `
+                    <div style="margin-top:10px; border:1px solid rgba(255,149,0,0.3); border-radius:8px; padding:8px; background:rgba(255,149,0,0.06);">
+                        <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">⏱ Kitchen Preparation Time</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; text-align:center;">
+                            <div><div style="font-size:0.62rem; color:var(--text-muted);">PLACED</div><div style="font-weight:700;">${fmtClock(pd.placed)}</div></div>
+                            <div><div style="font-size:0.62rem; color:var(--text-muted);">STARTED</div><div style="font-weight:700;">${fmtClock(pd.started)}</div></div>
+                            <div><div style="font-size:0.62rem; color:var(--text-muted);">READY</div><div style="font-weight:700;">${fmtClock(pd.ready)}</div></div>
+                            <div><div style="font-size:0.62rem; color:var(--text-muted);">WAIT</div><div style="font-weight:700;">${fmtDuration(pd.waitMs)}</div></div>
+                            <div><div style="font-size:0.62rem; color:var(--text-muted);">PREP</div><div style="font-weight:700; color:#FF9500;">${fmtDuration(pd.prepMs)}</div></div>
+                            <div><div style="font-size:0.62rem; color:var(--text-muted);">TOTAL</div><div style="font-weight:700; color:var(--success);">${fmtDuration(pd.totalMs)}</div></div>
+                        </div>
+                    </div>`;
+            } else {
+                timingHtml = `<div style="font-size:0.78rem; color:var(--text-muted); margin-top:8px;">⏱ Prep time: not started in kitchen yet</div>`;
+            }
+
             // Source badge
             const srcLabel = data.orderSource === 'customer' ? '📱 Customer App Order' : '🖥️ POS / Outlet Order';
             const srcHtml = `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">${srcLabel}</div>`;
-            
-            document.getElementById('viewItemsList').innerHTML = itemsHtml + discountHtml + kotHtml + srcHtml;
+            const typeHtml = `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">${orderTypeLabel(data.orderType)} Order</div>`;
+
+            document.getElementById('viewItemsList').innerHTML = itemsHtml + discountHtml + kotHtml + timingHtml + srcHtml + typeHtml;
 
             // Populate Payment
             document.getElementById('editTotal').value = data.finalPaid || data.total;
@@ -2374,8 +2604,9 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             let newBonus = 0;
             
             if (isCompleted) {
-                // Calculate what the bonus SHOULD be now (5% of new total)
-                newBonus = Math.floor(newTotal * 0.05);
+                // Delivery orders earn no bonus; dine-in earns 5% of the new total
+                const isDeliveryOrder = oldOrderData.orderType === 'delivery';
+                newBonus = isDeliveryOrder ? 0 : Math.floor(newTotal * 0.05);
 
                 // Get the OLD bonus (use recorded 'bonusEarned' or calculate it if missing)
                 const oldBonus = oldOrderData.bonusEarned !== undefined 
@@ -2389,15 +2620,10 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
                 const custRef = doc(window.db, 'customers', custPhone);
                 const custDoc = await transaction.get(custRef);
 
-                if (custDoc.exists()) {
-                    const currentPoints = custDoc.data().points || 0;
-                    const newBalance = currentPoints + pointDifference;
-                    
-                    if (newBalance < 0) {
-                        console.warn("Customer points dropped below zero.");
-                    }
-
-                    transaction.update(custRef, { points: newBalance });
+                if (custDoc.exists() && pointDifference !== 0) {
+                    // Apply the difference through the lot ledger so expiry stays consistent.
+                    const newLots = adjustPointLots(custDoc.data(), pointDifference);
+                    transaction.update(custRef, { points: lotsTotal(newLots), pointLots: serializeLots(newLots) });
                 }
             }
 
@@ -2798,7 +3024,7 @@ function filterMenu(text) {
             const targetCart = STATE.role === 'customer' ? STATE.custCart : STATE.cart;
             const existing = targetCart.find(c => c.id === itemId);
             if(existing) existing.qty++;
-            else targetCart.push({ ...item, qty: 1 });
+            else targetCart.push({ ...item, qty: 1, parcelQty: 0 });
             renderActiveCart();
         }
 
@@ -2822,6 +3048,9 @@ function filterMenu(text) {
             if(item.qty <= 0) {
                 if(STATE.role === 'customer') STATE.custCart = STATE.custCart.filter(c => c.id !== itemId);
                 else STATE.cart = STATE.cart.filter(c => c.id !== itemId);
+            } else if(item.parcelQty && item.parcelQty > item.qty) {
+                // Keep parcel split valid when total quantity drops
+                item.parcelQty = item.qty;
             }
             renderActiveCart();
         }
@@ -2830,6 +3059,8 @@ function filterMenu(text) {
             STATE.cart = [];
             STATE.editingOrderId = null;
             STATE.kitchenLockedItems = [];
+            STATE.orderType = 'dine-in';
+            updateOrderTypeButtons();
             document.getElementById('posPhone').value = '';
             document.getElementById('btnPlaceOrder').classList.remove('hidden');
             document.getElementById('btnUpdateOrder').classList.add('hidden');
@@ -2880,7 +3111,23 @@ function filterMenu(text) {
                     ? `<span style="font-size:0.65rem; background:rgba(255,149,0,0.2); color:#FF9500; padding:1px 5px; border-radius:4px; margin-left:5px; font-weight:700;">🔥 KITCHEN</span>`
                     : '';
 
+                // Per-item Dine-in / Parcel split (POS cart, dine-in orders only)
+                const isOutletCart = container.id === 'cartItemsList';
+                const showParcel = isOutletCart && STATE.role !== 'customer' && STATE.orderType === 'dine-in';
+                const parcelQty = Math.min(item.parcelQty || 0, item.qty);
+                const dineQty = item.qty - parcelQty;
+                const parcelControl = showParcel ? `
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin:4px 0 8px; padding:4px 8px; background:rgba(0,212,255,0.06); border:1px solid rgba(0,212,255,0.12); border-radius:6px; font-size:0.7rem;">
+                        <span class="text-muted">🍽️ Dine ${dineQty} &nbsp;|&nbsp; 📦 Parcel ${parcelQty}</span>
+                        <div class="qty-controls" style="gap:4px;">
+                            <div class="qty-btn" style="width:22px; height:22px;" onclick="setItemParcel('${item.id}', -1)" title="Fewer parcel">-</div>
+                            <span style="padding:0 4px;">📦 ${parcelQty}</span>
+                            <div class="qty-btn" style="width:22px; height:22px;" onclick="setItemParcel('${item.id}', 1)" title="More parcel">+</div>
+                        </div>
+                    </div>` : '';
+
                 return `
+                    <div>
                     <div class="cart-item">
                         <div>
                             <div style="font-size: 0.9rem;">${item.name}${lockBadge}</div>
@@ -2891,6 +3138,8 @@ function filterMenu(text) {
                             <span style="padding: 0 5px;">${item.qty}</span>
                             <div class="qty-btn" onclick="updateQty('${item.id}', 1)">+</div>
                         </div>
+                    </div>
+                    ${parcelControl}
                     </div>
                 `;
             }).join('');
@@ -2931,7 +3180,7 @@ function filterMenu(text) {
             const btn = document.getElementById('btnPlaceOrder');
             if (btn) { btn.disabled = true; btn.innerText = 'Placing...'; }
             try {
-                await submitOrder(phone, STATE.cart, 'pending');
+                await submitOrder(phone, STATE.cart, 'pending', 'pos', STATE.orderType);
                 clearCart();
                 switchOutletTab('current');
             } catch(e) {
@@ -2961,12 +3210,22 @@ function filterMenu(text) {
             }
         }
 
-        async function submitOrder(phone, items, status, source='pos') {
+        async function submitOrder(phone, items, status, source='pos', orderType='dine-in') {
             const { addDoc, collection, serverTimestamp, doc, setDoc, getDoc } = window.firebaseModules;
             
             // IMPORTANT: Deep-copy items immediately so clearing the cart later
             // cannot mutate the array we're about to write to Firestore.
             const itemsSnapshot = JSON.parse(JSON.stringify(items));
+
+            // Normalize parcel split: delivery is fully to-go (no per-item split needed);
+            // dine-in keeps parcelQty clamped to the item quantity.
+            itemsSnapshot.forEach(it => {
+                if (orderType === 'delivery') {
+                    it.parcelQty = 0;
+                } else {
+                    it.parcelQty = Math.min(Math.max(it.parcelQty || 0, 0), it.qty || 0);
+                }
+            });
             
             // 1. Fetch Customer Details
             const custRef = doc(window.db, 'customers', phone);
@@ -3019,7 +3278,8 @@ function filterMenu(text) {
                 stockModel: stockBlocked ? 'reserved-v2' : null,
                 stockFinalized: false,
                 kotStatus: null,        // KOT status: null | 'preparing' | 'completed'
-                orderSource: source     // 'pos' | 'customer'
+                orderSource: source,    // 'pos' | 'customer'
+                orderType: orderType    // 'dine-in' | 'delivery'
                 });
             } catch(e) {
                 if (stockBlocked) {
@@ -3159,6 +3419,7 @@ async function searchHistory() {
                         <div style="font-weight:bold; font-size:1.1rem;">${srcLabel} ${o.customerName || o.phone}</div>
                         <div class="text-muted" style="font-size:0.85rem;">${dateStr} • <span style="color:${statusColor}">${o.status.toUpperCase()}</span>${kotBadge}</div>
                         <div class="text-muted" style="font-size:0.8rem;">₹${o.total} • ${o.paymentMode || 'Cash'}</div>
+                        ${prepSummaryLine(o)}
                     </div>
                     <div style="text-align:right;">
                         <div style="font-weight:bold; font-size:1.2rem;">₹${o.total}</div>
@@ -3253,6 +3514,11 @@ const customerDisplay = o.customerName
                     ? `<span style="background:rgba(123,140,222,0.3); color:#7B8CDE; padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">📱 CUSTOMER</span>`
                     : `<span style="background:rgba(0,212,255,0.15); color:var(--primary); padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">🖥️ POS</span>`;
 
+                // Order type badge (dine-in / delivery)
+                const typeBadge = o.orderType === 'delivery'
+                    ? `<span style="background:rgba(255,149,0,0.18); color:#FF9500; padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">🚚 DELIVERY</span>`
+                    : `<span style="background:rgba(0,229,160,0.15); color:var(--success); padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">🍽️ DINE-IN</span>`;
+
                 // Edit button logic:
                 // - No kotStatus: full edit allowed
                 // - preparing: add-only mode (show warning label)
@@ -3275,6 +3541,7 @@ const customerDisplay = o.customerName
                             <div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">
                                 <span class="order-status status-pending" style="font-size:0.65rem;">PENDING</span>
                                 ${sourceBadge}
+                                ${typeBadge}
                                 <span class="text-muted" style="font-size:0.75rem; margin-left:5px;">📅 ${timeStr}</span>
                             </div>
                             <div style="margin-top:4px;">${kotBadgeHtml}</div>
@@ -3286,7 +3553,7 @@ const customerDisplay = o.customerName
                     </div>
                     
                     <div class="text-muted" style="font-size:0.9rem; border-top:1px solid rgba(0,212,255,0.15); padding-top:8px; margin-top:5px;">
-                        ${o.items.map(i => `${i.qty}x ${i.name}`).join(', ')}
+                        ${o.items.map(i => `${i.qty}x ${i.name}${(o.orderType !== 'delivery' && i.parcelQty > 0) ? ` (📦${i.parcelQty})` : ''}`).join(', ')}
                     </div>
                     
                     <div class="flex gap-2" style="margin-top:12px;">
@@ -3318,15 +3585,23 @@ function printKOT(orderId) {
         <div class="kot-header">
             <div class="kot-title">KOT #${serial}</div>
             <div class="kot-meta">${time} • ${order.status.toUpperCase()}</div>
+            <div class="kot-meta">Type: ${order.orderType === 'delivery' ? 'DELIVERY' : 'DINE-IN'}</div>
             <div class="kot-meta">Customer: ${order.customerName || 'Guest'}</div>
         </div>
         <div class="kot-items">
-            ${order.items.map(item => `
+            ${order.items.map(item => {
+                const segs = itemServeSegments(item, order.orderType || 'dine-in');
+                return segs.map(s => {
+                    const tag = s.tag === 'PARCEL' ? ' <b>[PARCEL]</b>'
+                              : (s.tag === 'DELIVERY' ? ' <b>[DELIVERY]</b>' : '');
+                    return `
                 <div class="kot-item-row">
-                    <div style="width:20px;">${item.qty}</div>
-                    <div style="flex:1;">${item.name}</div>
+                    <div style="width:20px;">${s.qty}</div>
+                    <div style="flex:1;">${item.name}${tag}</div>
                 </div>
-            `).join('')}
+            `;
+                }).join('');
+            }).join('')}
         </div>
         <div class="kot-footer">
             Total Items: ${totalQty}<br>
@@ -3361,6 +3636,10 @@ function printKOT(orderId) {
                 const hasDiscount = o.discount && o.discount.amount > 0;
                 const discountBadge = hasDiscount ? `<span class="discount-badge">🎫 ${o.discount.code}</span>` : '';
 
+                const typeBadge = o.orderType === 'delivery'
+                    ? `<span style="background:rgba(255,149,0,0.18); color:#FF9500; padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">🚚 DELIVERY</span>`
+                    : `<span style="background:rgba(0,229,160,0.15); color:var(--success); padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">🍽️ DINE-IN</span>`;
+
                 return `
                 <div class="order-card ${hasDiscount ? 'discount-applied' : ''}" onclick="viewOrderDetails('${o.id}')" style="cursor:pointer; position:relative;">
                     ${discountBadge}
@@ -3368,6 +3647,7 @@ function printKOT(orderId) {
                         <div>
                             <div style="margin-bottom:5px;">${customerDisplay}</div>
                             <span class="order-status status-completed" style="font-size:0.65rem;">COMPLETED</span>
+                            ${typeBadge}
                             <span class="text-muted" style="font-size:0.75rem; margin-left:5px;">📅 ${timeStr}</span>
                         </div>
                         <div style="text-align:right;">
@@ -3466,6 +3746,9 @@ function printKOT(orderId) {
                     }
                     STATE.cart = JSON.parse(JSON.stringify(data.items));
                     STATE.editingOrderId = orderId;
+                    // Restore order type (dine-in / delivery) for this order
+                    STATE.orderType = data.orderType === 'delivery' ? 'delivery' : 'dine-in';
+                    updateOrderTypeButtons();
                     
                     // Load discount if exists
                     if(data.discount && data.discount.code) {
@@ -3537,6 +3820,14 @@ async function deletePendingOrder(orderId) {
             const total = STATE.cart.reduce((s, i) => s + (i.price * i.qty), 0);
             // Deep-copy cart now so clearCart() cannot corrupt data mid-flight
             const itemsSnapshot = JSON.parse(JSON.stringify(STATE.cart));
+            // Normalize parcel split based on the (possibly changed) order type
+            itemsSnapshot.forEach(it => {
+                if (STATE.orderType === 'delivery') {
+                    it.parcelQty = 0;
+                } else {
+                    it.parcelQty = Math.min(Math.max(it.parcelQty || 0, 0), it.qty || 0);
+                }
+            });
             
             // Calculate final total with discount
             let finalTotal = total;
@@ -3601,6 +3892,7 @@ async function deletePendingOrder(orderId) {
                     total: finalTotal,
                     phone: newPhone,
                     customerName: custName,
+                    orderType: STATE.orderType,
                     stockBlocked: newStockBlocked,
                     stockModel: newStockBlocked ? 'reserved-v2' : null
                 });
@@ -3719,10 +4011,13 @@ async function deletePendingOrder(orderId) {
             const orderSnap = await getDoc(orderRef);
             
             let hasCoupon = false;
+            let isDelivery = false;
             if (orderSnap.exists()) {
                 const orderData = orderSnap.data();
                 hasCoupon = orderData.discount && orderData.discount.code;
                 PAYMENT_DATA.hasCoupon = hasCoupon;
+                PAYMENT_DATA.orderType = orderData.orderType || 'dine-in';
+                isDelivery = PAYMENT_DATA.orderType === 'delivery';
             }
 
             // Fetch Customer Points
@@ -3730,20 +4025,30 @@ async function deletePendingOrder(orderId) {
             const snap = await getDoc(custRef);
             
             if(snap.exists()) {
-                const pts = snap.data().points || 0;
-                PAYMENT_DATA.maxPoints = pts;
-                document.getElementById('payAvailPoints').innerText = pts + ' pts';
+                const { available } = reconcilePointLots(snap.data());
+                PAYMENT_DATA.maxPoints = available;
+                document.getElementById('payAvailPoints').innerText = available + ' pts';
             } else {
                 document.getElementById('payAvailPoints').innerText = '0 pts';
             }
 
-            // Disable bonus redemption if coupon is applied
+            // Disable bonus redemption if coupon is applied OR this is a delivery order
             const bonusSection = document.getElementById('bonusRedemptionSection');
             const redeemInput = document.getElementById('redeemInput');
             const bonusInfoText = document.getElementById('bonusInfoText');
             const maxButton = bonusSection.querySelector('button');
             
-            if (hasCoupon) {
+            if (isDelivery) {
+                redeemInput.value = '';
+                redeemInput.disabled = true;
+                redeemInput.style.opacity = '0.5';
+                redeemInput.style.cursor = 'not-allowed';
+                maxButton.disabled = true;
+                maxButton.style.opacity = '0.5';
+                maxButton.style.cursor = 'not-allowed';
+                bonusInfoText.innerHTML = '🚚 Delivery order — no points are earned and existing points cannot be redeemed.';
+                bonusInfoText.style.color = 'var(--warning)';
+            } else if (hasCoupon) {
                 redeemInput.disabled = true;
                 redeemInput.style.opacity = '0.5';
                 redeemInput.style.cursor = 'not-allowed';
@@ -3759,9 +4064,10 @@ async function deletePendingOrder(orderId) {
                 maxButton.disabled = false;
                 maxButton.style.opacity = '1';
                 maxButton.style.cursor = 'pointer';
-                bonusInfoText.innerHTML = '1 Point = ₹1 | New bonus will add to balance.';
+                bonusInfoText.innerHTML = '1 Point = ₹1 | New bonus valid for ' + POINT_VALIDITY_DAYS + ' days.';
                 bonusInfoText.style.color = '';
             }
+            updatePaymentCalc();
         }
 
         function updatePaymentCalc() {
@@ -3789,7 +4095,9 @@ async function deletePendingOrder(orderId) {
         }
 
         async function processPayment() {
-            const redeem = parseInt(document.getElementById('redeemInput').value) || 0;
+            const isDelivery = PAYMENT_DATA.orderType === 'delivery';
+            // Delivery orders never redeem points
+            let redeem = isDelivery ? 0 : (parseInt(document.getElementById('redeemInput').value) || 0);
             const netPayable = PAYMENT_DATA.total - redeem;
             const payMode = document.getElementById('paymentModeInput').value;
             const cashGiven = parseInt(document.getElementById('cashGiven').value) || 0;
@@ -3841,14 +4149,24 @@ async function deletePendingOrder(orderId) {
                     PAYMENT_DATA.stockModel = orderData.stockModel || 'legacy-block-deducted';
                     PAYMENT_DATA.alreadyFinalized = !!orderData.stockFinalized;
                     
-                    const currentPoints = custDoc.exists() ? (custDoc.data().points || 0) : 0;
-                    if (redeem > currentPoints) throw "Insufficient points!";
+                    // Reconcile non-expired points from the lot ledger
+                    const custDataForPts = custDoc.exists() ? custDoc.data() : {};
+                    const reconciled = reconcilePointLots(custDataForPts);
+                    if (redeem > reconciled.available) throw "Insufficient points!";
 
-                    const newBonus = Math.floor(netPayable * 0.05);
-                    
+                    // Delivery orders earn NO bonus; dine-in earns 5% valid for POINT_VALIDITY_DAYS
+                    const newBonus = isDelivery ? 0 : Math.floor(netPayable * 0.05);
+
+                    // Consume redeemed points (earliest-expiring first), then add the new bonus lot
+                    let updatedLots = consumePointLots(reconciled.lots, redeem);
+                    if (newBonus > 0) {
+                        updatedLots.push({ amount: newBonus, expiresAt: Date.now() + POINT_VALIDITY_DAYS * 86400000 });
+                    }
+                    const newBalance = lotsTotal(updatedLots);
+
                     // Update Customer
                     if(custDoc.exists()) {
-                        transaction.update(custRef, { points: (currentPoints - redeem) + newBonus });
+                        transaction.update(custRef, { points: newBalance, pointLots: serializeLots(updatedLots) });
                     }
 
                     // Prepare order update data
@@ -3900,7 +4218,7 @@ async function deletePendingOrder(orderId) {
                 document.getElementById('paymentInputSection').classList.add('hidden');
                 document.getElementById('paymentSuccessSection').classList.remove('hidden');
                 document.getElementById('billSerial').innerText = PAYMENT_DATA.serial;
-                showToast(`Paid! Earned ${PAYMENT_DATA.bonusEarned} pts`);
+                showToast(PAYMENT_DATA.bonusEarned > 0 ? `Paid! Earned ${PAYMENT_DATA.bonusEarned} pts` : 'Payment successful!');
 
                 // Deduct blocked stock (moves blocked -> fully consumed) — skipped if kitchen already finalized
                 if (PAYMENT_DATA.items && PAYMENT_DATA.shouldDeduct) {
@@ -3938,6 +4256,7 @@ async function deletePendingOrder(orderId) {
             let text = `🧾 *${s.name}*\n${s.address}\n\n`;
             text += `--------------------------------\n`;
             text += `*BILL RECEIPT* #${d.serial}\nDate: ${date}\nCustomer: ${d.phone}\n`;
+            text += `Order Type: ${d.orderType === 'delivery' ? 'Delivery' : 'Dine-in'}\n`;
             text += `--------------------------------\n`;
             
             if(d.items) {
@@ -3962,8 +4281,10 @@ async function deletePendingOrder(orderId) {
             }
             
             text += `--------------------------------\n`;
-            text += `Points Earned:  +${d.bonusEarned}\n`;
-            text += `--------------------------------\n`;
+            if(d.bonusEarned > 0) {
+                text += `Points Earned:  +${d.bonusEarned}\n`;
+                text += `--------------------------------\n`;
+            }
             text += `${s.footer}\n${s.link}`;
 
             const encoded = encodeURIComponent(text);
@@ -3971,7 +4292,9 @@ async function deletePendingOrder(orderId) {
             if (type === 'whatsapp') {
                 window.open(`https://wa.me/91${d.phone}?text=${encoded}`, '_blank');
             } else {
-                const shortText = `Bill for ${s.name}: ₹${d.finalPaid} paid. Points earned: ${d.bonusEarned}. Thanks!`;
+                const shortText = d.bonusEarned > 0
+                    ? `Bill for ${s.name}: ₹${d.finalPaid} paid. Points earned: ${d.bonusEarned}. Thanks!`
+                    : `Bill for ${s.name}: ₹${d.finalPaid} paid. Thank you!`;
                 window.open(`sms:${d.phone}?body=${encodeURIComponent(shortText)}`, '_blank');
             }
             // Record that the bill was sent (shows indicator in Admin panel)
@@ -4194,15 +4517,21 @@ async function printKOTDirect(orderId) {
     addText(`KOT #${serial}\n`);
     addCmd(0x1B, 0x21, 0x00); // Normal
     addText(`${time}\n${order.status.toUpperCase()}\n`);
+    addText(`Type: ${order.orderType === 'delivery' ? 'DELIVERY' : 'DINE-IN'}\n`);
     addText(`Cust: ${order.customerName || 'Guest'}\n`);
     addText(`Ph: ${order.phone || 'N/A'}\n`);
     addText("--------------------------------\n");
     
     addCmd(0x1B, 0x61, 0); // Left
     order.items.forEach(item => {
-        addCmd(0x1B, 0x45, 1); // Bold
-        addText(`${item.qty} x ${item.name}\n`);
-        addCmd(0x1B, 0x45, 0); // Bold Off
+        const segs = itemServeSegments(item, order.orderType || 'dine-in');
+        segs.forEach(s => {
+            const tag = s.tag === 'PARCEL' ? ' [PARCEL]'
+                      : (s.tag === 'DELIVERY' ? ' [DELIVERY]' : '');
+            addCmd(0x1B, 0x45, 1); // Bold
+            addText(`${s.qty} x ${item.name}${tag}\n`);
+            addCmd(0x1B, 0x45, 0); // Bold Off
+        });
     });
 
     addText("--------------------------------\n");
@@ -4274,6 +4603,7 @@ async function printBillDirect(orderId) {
         addText(`Bill No: ${serial}\n`);
         addText(`Cust: ${order.customerName || 'Guest'}\n`);
         addText(`Ph: ${order.phone || 'N/A'}\n`);
+        addText(`Type: ${order.orderType === 'delivery' ? 'Delivery' : 'Dine-in'}\n`);
         addText("--------------------------------\n");
         
         // ITEMS HEADER
