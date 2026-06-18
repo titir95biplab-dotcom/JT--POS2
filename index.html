@@ -383,6 +383,7 @@ async function trackUserActivity(phone) {
                 <button class="btn btn-secondary tab-btn" onclick="switchAdminTab('settings')" id="btn-adm-settings">⚙️ Settings</button>
 <button class="btn btn-secondary tab-btn" onclick="switchAdminTab('notify')" id="btn-adm-notify">📢 Notify</button>
 <button class="btn btn-secondary tab-btn" onclick="switchAdminTab('inventory')" id="btn-adm-inventory">🏪 Inventory</button>
+<button class="btn btn-secondary tab-btn" onclick="switchAdminTab('cash')" id="btn-adm-cash">💰 Cash</button>
             </div>
 
 <div id="adm-view-notify" class="hidden">
@@ -405,6 +406,44 @@ async function trackUserActivity(phone) {
     <div style="margin-top: 20px;">
         <h4>Recent Broadcasts</h4>
         <div id="adminNotifHistory"></div>
+    </div>
+</div>
+<!-- ADMIN CASH MANAGEMENT VIEW -->
+<div id="adm-view-cash" class="hidden">
+
+    <!-- ── STAFF MANAGEMENT ── -->
+    <div class="card" style="margin-bottom:16px;">
+        <h3 style="margin-bottom:6px;">👥 Staff Management</h3>
+        <p class="text-muted" style="font-size:0.8rem; margin-bottom:12px;">Staff names appear in the Outlet POS selector so every order &amp; cash entry is attributed.</p>
+        <div class="flex gap-2" style="margin-bottom:12px;">
+            <input type="text" id="newStaffName" class="input" placeholder="Staff name" style="margin:0; flex:1;">
+            <button class="btn btn-primary btn-sm" onclick="addStaffMember()" style="white-space:nowrap;">➕ Add Staff</button>
+        </div>
+        <div id="adminStaffList"></div>
+    </div>
+
+    <!-- ── CASH BOX REPORT ── -->
+    <div class="card">
+        <div class="flex justify-between items-center" style="margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+            <h3 style="margin:0;">📒 Cash Box Report</h3>
+            <div class="flex items-center gap-2">
+                <input type="date" id="cashReportDate" class="input" style="margin:0; padding:6px 8px; font-size:0.85rem;">
+                <button class="btn btn-secondary btn-sm" onclick="loadCashReport()">Load</button>
+            </div>
+        </div>
+
+        <div id="cashReportSummary" style="border:1px solid rgba(0,212,255,0.18); border-radius:10px; padding:12px; margin-bottom:14px; background:rgba(0,212,255,0.04);">
+            <p class="text-muted text-center" style="font-size:0.85rem;">Select a date and tap Load.</p>
+        </div>
+
+        <h4 style="margin-bottom:8px;">🧾 Expenses</h4>
+        <div id="cashReportExpenses" style="margin-bottom:14px;"></div>
+
+        <h4 style="margin-bottom:8px;">➕ Manual Cash-Ins</h4>
+        <div id="cashReportCashIns" style="margin-bottom:14px;"></div>
+
+        <h4 style="margin-bottom:8px;">✓ Reconciliation Checks</h4>
+        <div id="cashReportChecks"></div>
     </div>
 </div>
 <!-- ADMIN INVENTORY VIEW — Dynamic Recipe System -->
@@ -741,6 +780,9 @@ async function trackUserActivity(phone) {
     </div>
     
     <div class="flex gap-2">
+        <select id="posStaffSelect" class="input" onchange="setActiveStaff(this.value)" style="margin:0; padding:6px 10px; font-size:0.85rem; max-width:160px;" title="Who is handling the POS">
+            <option value="">👤 Select Staff</option>
+        </select>
         <button id="btnConnectPrinter" class="btn btn-warning btn-sm" onclick="connectPrinter()">🖨️ Connect</button>
         <button class="btn btn-danger btn-sm" onclick="logout()">Logout</button>
     </div>
@@ -758,6 +800,7 @@ async function trackUserActivity(phone) {
     <button class="btn btn-secondary tab-btn" onclick="switchOutletTab('current')" id="tab-current" title="Current">⏳</button>
     <button class="btn btn-secondary tab-btn" onclick="switchOutletTab('completed')" id="tab-completed" title="Completed">✅</button>
     <button class="btn btn-secondary tab-btn" onclick="switchOutletTab('stock')" id="tab-stock" title="Stock">📦</button>
+    <button class="btn btn-secondary tab-btn" onclick="switchOutletTab('management')" id="tab-management" title="Cash Management">💰</button>
 </div>
 
             <div id="view-pos" class="pos-container">
@@ -831,6 +874,83 @@ async function trackUserActivity(phone) {
                     </div>
                     <p class="text-muted" style="font-size:0.8rem; margin-bottom:15px;">Calculated stock may differ from actual. You can manually edit.</p>
                     <div id="outletStockList"></div>
+                </div>
+            </div>
+
+            <div id="view-management" class="hidden">
+                <div class="flex justify-between items-center" style="margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+                    <h3>💰 Cash Management</h3>
+                    <div class="flex items-center gap-2">
+                        <span id="mgmtStaffLabel" class="text-muted" style="font-size:0.8rem;"></span>
+                        <button class="btn btn-secondary btn-sm" onclick="loadManagementData()">🔄 Refresh</button>
+                    </div>
+                </div>
+                <div id="mgmtDateLabel" class="text-muted" style="font-size:0.8rem; margin-bottom:12px;"></div>
+
+                <!-- ── CASH BOX CALCULATOR ── -->
+                <div class="card" style="margin-bottom:16px;">
+                    <h4 style="margin-bottom:12px;">🧮 Cash Box Calculator</h4>
+
+                    <!-- Opening balance -->
+                    <label class="text-muted" style="font-size:0.8rem;">Opening Balance (start of day)</label>
+                    <div class="flex gap-2" style="margin-bottom:10px;">
+                        <input type="number" id="mgmtOpening" class="input" placeholder="₹0" style="margin:0; text-align:right;">
+                        <button class="btn btn-primary btn-sm" onclick="setOpeningBalance()" style="white-space:nowrap;">Set Opening</button>
+                    </div>
+
+                    <!-- Live breakdown -->
+                    <div style="border:1px solid rgba(0,212,255,0.18); border-radius:10px; padding:12px; margin-bottom:12px; background:rgba(0,212,255,0.04);">
+                        <div class="flex justify-between" style="font-size:0.9rem; margin-bottom:6px;"><span class="text-muted">Opening Balance</span><span id="calcOpening">₹0</span></div>
+                        <div class="flex justify-between" style="font-size:0.9rem; margin-bottom:6px;"><span class="text-muted">+ Cash Sales (auto)</span><span id="calcCashSales" style="color:var(--success);">₹0</span></div>
+                        <div class="flex justify-between" style="font-size:0.9rem; margin-bottom:6px;"><span class="text-muted">+ Manual Cash-In</span><span id="calcCashIn" style="color:var(--success);">₹0</span></div>
+                        <div class="flex justify-between" style="font-size:0.9rem; margin-bottom:6px;"><span class="text-muted">− Expenses (auto)</span><span id="calcExpenses" style="color:#FF6B6B;">₹0</span></div>
+                        <div class="flex justify-between font-bold" style="font-size:1.05rem; border-top:1px solid rgba(255,255,255,0.12); padding-top:8px; margin-top:4px;"><span>Expected in Box</span><span id="calcExpected">₹0</span></div>
+                    </div>
+
+                    <!-- Reconcile -->
+                    <label class="text-muted" style="font-size:0.8rem;">Actual Counted Cash (count the box now)</label>
+                    <div class="flex gap-2" style="margin-bottom:10px;">
+                        <input type="number" id="mgmtCounted" class="input" placeholder="₹0" style="margin:0; text-align:right;">
+                        <button class="btn btn-success btn-sm" onclick="reconcileCashBox()" style="white-space:nowrap;">✓ Check Match</button>
+                    </div>
+                    <div id="mgmtMatchResult" style="display:none; padding:10px; border-radius:8px; font-weight:700; text-align:center; margin-bottom:6px;"></div>
+
+                    <!-- Manual cash-in -->
+                    <div style="border-top:1px dashed rgba(255,255,255,0.12); padding-top:12px; margin-top:6px;">
+                        <label class="text-muted" style="font-size:0.8rem;">➕ Manual Cash-In (special reason)</label>
+                        <div class="flex gap-2" style="margin-top:6px;">
+                            <input type="number" id="mgmtCashInAmt" class="input" placeholder="₹" style="margin:0; text-align:right; max-width:110px;">
+                            <input type="text" id="mgmtCashInReason" class="input" placeholder="Reason" style="margin:0; flex:1;">
+                            <button class="btn btn-secondary btn-sm" onclick="addManualCashIn()" style="white-space:nowrap;">Add</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── CASH EXPENSE TRACKER ── -->
+                <div class="card">
+                    <h4 style="margin-bottom:12px;">🧾 Cash Expense Tracker</h4>
+                    <label class="text-muted" style="font-size:0.8rem;">Amount</label>
+                    <input type="number" id="expAmount" class="input" placeholder="₹0" style="text-align:right;">
+                    <label class="text-muted" style="font-size:0.8rem;">Category</label>
+                    <select id="expCategory" class="input">
+                        <option value="Local Market">Local Market</option>
+                        <option value="Chicken">Chicken</option>
+                        <option value="Vegetable">Vegetable</option>
+                        <option value="Flipkart">Flipkart</option>
+                        <option value="Amazon">Amazon</option>
+                        <option value="Blinkit">Blinkit</option>
+                        <option value="JioMart">JioMart</option>
+                        <option value="Other">Other</option>
+                    </select>
+                    <label class="text-muted" style="font-size:0.8rem;">Note (optional)</label>
+                    <input type="text" id="expNote" class="input" placeholder="e.g. 2kg chicken">
+                    <button class="btn btn-danger w-full" onclick="addCashExpense()" style="margin-top:6px;">− Record Cash Out</button>
+
+                    <div class="flex justify-between items-center" style="margin-top:16px; margin-bottom:8px;">
+                        <h4 style="margin:0;">Today's Expenses</h4>
+                        <strong id="expTodayTotal" style="color:#FF6B6B;">₹0</strong>
+                    </div>
+                    <div id="expTodayList"></div>
                 </div>
             </div>
         </div>
@@ -1055,6 +1175,8 @@ async function trackUserActivity(phone) {
             editingOrderId: null,
             kitchenLockedItems: [], // items locked by kitchen (cannot reduce/remove)
             orderType: 'dine-in', // 'dine-in' | 'delivery' — set when taking an order
+            staffRoster: [],      // operational staff names (managed from admin panel)
+            activeStaff: '',      // currently selected staff handling the outlet POS
             activeCategory: 'All',
 	    adminActiveCategory: 'All',
             tempPhone: null,
@@ -1246,6 +1368,341 @@ function prepSummaryLine(order) {
     return `<div class="text-muted" style="font-size:0.78rem; color:#FF9500;">⏱ Prep: ${fmtDuration(prepMs)} • Total: ${fmtDuration(totalMs)}</div>`;
 }
 
+// ==========================================================
+// STAFF ROSTER & CASH MANAGEMENT
+// ==========================================================
+let CASH_TODAY = null; // cached today's cash figures for reconciliation
+
+// Local date as YYYY-MM-DD (device local time, used to bucket the cash day).
+function todayStr() {
+    const d = new Date();
+    const off = d.getTimezoneOffset();
+    return new Date(d.getTime() - off * 60000).toISOString().split('T')[0];
+}
+
+function escAttr(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ── STAFF ROSTER ──
+function loadStaffRoster() {
+    const { collection, onSnapshot, query } = window.firebaseModules;
+    onSnapshot(query(collection(window.db, 'staffRoster')), (snap) => {
+        STATE.staffRoster = snap.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        renderStaffSelect();
+        renderAdminStaffList();
+    }, (e) => console.error('staffRoster listen failed:', e));
+}
+
+function renderStaffSelect() {
+    const sel = document.getElementById('posStaffSelect');
+    if (!sel) return;
+    const saved = STATE.activeStaff || localStorage.getItem('mh_active_staff') || '';
+    sel.innerHTML = `<option value="">👤 Select Staff</option>` +
+        STATE.staffRoster.map(s => `<option value="${escAttr(s.name)}">${escAttr(s.name)}</option>`).join('');
+    // Keep selection if that staff still exists
+    if (saved && STATE.staffRoster.some(s => s.name === saved)) {
+        sel.value = saved;
+        STATE.activeStaff = saved;
+    } else if (saved && STATE.staffRoster.length) {
+        // Staff removed — clear stale selection
+        STATE.activeStaff = '';
+        localStorage.removeItem('mh_active_staff');
+    }
+    updateStaffLabel();
+}
+
+function setActiveStaff(name) {
+    STATE.activeStaff = name || '';
+    if (name) localStorage.setItem('mh_active_staff', name);
+    else localStorage.removeItem('mh_active_staff');
+    updateStaffLabel();
+}
+
+function getActiveStaff() {
+    return STATE.activeStaff || localStorage.getItem('mh_active_staff') || '';
+}
+
+function updateStaffLabel() {
+    const lbl = document.getElementById('mgmtStaffLabel');
+    const staff = getActiveStaff();
+    if (lbl) lbl.innerText = staff ? `👤 ${staff}` : '⚠️ No staff selected';
+}
+
+async function addStaffMember() {
+    const input = document.getElementById('newStaffName');
+    const name = (input.value || '').trim();
+    if (!name) return showToast('Enter a staff name', 'error');
+    if (STATE.staffRoster.some(s => (s.name || '').toLowerCase() === name.toLowerCase()))
+        return showToast('Staff already exists', 'error');
+    const { collection, addDoc, serverTimestamp } = window.firebaseModules;
+    try {
+        await addDoc(collection(window.db, 'staffRoster'), { name, active: true, createdAt: serverTimestamp() });
+        input.value = '';
+        showToast('Staff added', 'success');
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteStaffMember(id, name) {
+    if (!confirm(`Remove staff "${name}"? Past orders/entries keep their recorded name.`)) return;
+    const { doc, deleteDoc } = window.firebaseModules;
+    try {
+        await deleteDoc(doc(window.db, 'staffRoster', id));
+        showToast('Staff removed', 'success');
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+function renderAdminStaffList() {
+    const list = document.getElementById('adminStaffList');
+    if (!list) return;
+    if (!STATE.staffRoster.length) {
+        list.innerHTML = '<p class="text-muted" style="font-size:0.85rem;">No staff added yet.</p>';
+        return;
+    }
+    list.innerHTML = STATE.staffRoster.map(s => `
+        <div class="flex justify-between items-center" style="padding:8px 10px; border:1px solid var(--border, rgba(255,255,255,0.1)); border-radius:8px; margin-bottom:6px;">
+            <span>👤 ${escAttr(s.name)}</span>
+            <button class="btn btn-danger btn-sm" onclick="deleteStaffMember('${s.id}', '${escAttr(s.name)}')" style="padding:2px 8px; font-size:0.7rem;">Remove</button>
+        </div>
+    `).join('');
+}
+
+// ── CASH SALES (auto from completed orders) ──
+// Sum of cashAmount across orders completed on the given local date.
+async function computeCashSalesForDate(dateStr) {
+    const { collection, query, where, getDocs } = window.firebaseModules;
+    const start = new Date(dateStr + 'T00:00:00');
+    const end = new Date(dateStr + 'T23:59:59.999');
+    const q = query(collection(window.db, 'orders'),
+        where('timestamp', '>=', start), where('timestamp', '<=', end));
+    const snap = await getDocs(q);
+    let cash = 0;
+    snap.forEach(d => {
+        const o = d.data();
+        if (o.status !== 'completed') return;
+        // cashAmount is recorded for every completed order (0 for online)
+        if (typeof o.cashAmount === 'number') cash += o.cashAmount;
+        else if ((o.paymentMode || 'Cash') === 'Cash') cash += (o.finalPaid || o.total || 0);
+    });
+    return cash;
+}
+
+// ── LOAD TODAY'S MANAGEMENT DATA (outlet POS) ──
+async function loadManagementData() {
+    const date = todayStr();
+    updateStaffLabel();
+    const dl = document.getElementById('mgmtDateLabel');
+    if (dl) dl.innerText = `📅 Cash day: ${date}`;
+
+    const { collection, query, where, getDocs } = window.firebaseModules;
+    try {
+        // Cash entries for today (opening / in / out)
+        const entriesSnap = await getDocs(query(collection(window.db, 'cashEntries'), where('date', '==', date)));
+        let opening = 0, cashInTotal = 0, expenseTotal = 0;
+        const expenses = [];
+        entriesSnap.forEach(d => {
+            const e = d.data();
+            if (e.type === 'opening') opening = e.amount || 0;
+            else if (e.type === 'in') cashInTotal += (e.amount || 0);
+            else if (e.type === 'out') { expenseTotal += (e.amount || 0); expenses.push({ id: d.id, ...e }); }
+        });
+
+        const cashSales = await computeCashSalesForDate(date);
+        const expected = opening + cashSales + cashInTotal - expenseTotal;
+
+        // Cache for the reconcile step
+        CASH_TODAY = { date, opening, cashSales, cashInTotal, expenseTotal, expected };
+
+        // Fill calculator
+        document.getElementById('mgmtOpening').placeholder = '₹' + opening;
+        document.getElementById('calcOpening').innerText = '₹' + opening;
+        document.getElementById('calcCashSales').innerText = '₹' + cashSales;
+        document.getElementById('calcCashIn').innerText = '₹' + cashInTotal;
+        document.getElementById('calcExpenses').innerText = '₹' + expenseTotal;
+        document.getElementById('calcExpected').innerText = '₹' + expected;
+
+        // Expense list
+        expenses.sort((a, b) => tsMillis(b.createdAt) - tsMillis(a.createdAt));
+        document.getElementById('expTodayTotal').innerText = '₹' + expenseTotal;
+        const list = document.getElementById('expTodayList');
+        list.innerHTML = expenses.length ? expenses.map(e => `
+            <div class="flex justify-between items-center" style="padding:8px 10px; border:1px solid var(--border, rgba(255,255,255,0.1)); border-radius:8px; margin-bottom:6px;">
+                <div>
+                    <div style="font-size:0.9rem;">${escAttr(e.category)} ${e.note ? `<span class="text-muted">· ${escAttr(e.note)}</span>` : ''}</div>
+                    <div class="text-muted" style="font-size:0.72rem;">${fmtClock(tsMillis(e.createdAt))} ${e.staffName ? '· 👤 ' + escAttr(e.staffName) : ''}</div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <strong style="color:#FF6B6B;">₹${e.amount}</strong>
+                    <button class="btn btn-danger btn-sm" onclick="deleteCashEntry('${e.id}')" style="padding:2px 7px; font-size:0.7rem;">✕</button>
+                </div>
+            </div>`).join('') : '<p class="text-muted" style="font-size:0.85rem;">No expenses recorded today.</p>';
+    } catch (e) {
+        console.error(e);
+        showToast('Cash load error: ' + e.message, 'error');
+    }
+}
+
+async function setOpeningBalance() {
+    const amt = parseInt(document.getElementById('mgmtOpening').value);
+    if (isNaN(amt) || amt < 0) return showToast('Enter a valid opening balance', 'error');
+    const date = todayStr();
+    const { doc, setDoc, serverTimestamp } = window.firebaseModules;
+    try {
+        await setDoc(doc(window.db, 'cashEntries', 'open_' + date), {
+            type: 'opening', amount: amt, date,
+            staffName: getActiveStaff(), updatedAt: serverTimestamp()
+        }, { merge: true });
+        document.getElementById('mgmtOpening').value = '';
+        showToast('Opening balance set', 'success');
+        loadManagementData();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function addManualCashIn() {
+    const amt = parseInt(document.getElementById('mgmtCashInAmt').value);
+    const reason = (document.getElementById('mgmtCashInReason').value || '').trim();
+    if (isNaN(amt) || amt <= 0) return showToast('Enter a valid amount', 'error');
+    if (!getActiveStaff()) return showToast('Select staff first', 'error');
+    const { collection, addDoc, serverTimestamp } = window.firebaseModules;
+    try {
+        await addDoc(collection(window.db, 'cashEntries'), {
+            type: 'in', amount: amt, note: reason, date: todayStr(),
+            staffName: getActiveStaff(), createdAt: serverTimestamp()
+        });
+        document.getElementById('mgmtCashInAmt').value = '';
+        document.getElementById('mgmtCashInReason').value = '';
+        showToast('Cash-in recorded', 'success');
+        loadManagementData();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function addCashExpense() {
+    const amt = parseInt(document.getElementById('expAmount').value);
+    const category = document.getElementById('expCategory').value;
+    const note = (document.getElementById('expNote').value || '').trim();
+    if (isNaN(amt) || amt <= 0) return showToast('Enter a valid amount', 'error');
+    if (!getActiveStaff()) return showToast('Select staff first', 'error');
+    const { collection, addDoc, serverTimestamp } = window.firebaseModules;
+    try {
+        await addDoc(collection(window.db, 'cashEntries'), {
+            type: 'out', amount: amt, category, note, date: todayStr(),
+            staffName: getActiveStaff(), createdAt: serverTimestamp()
+        });
+        document.getElementById('expAmount').value = '';
+        document.getElementById('expNote').value = '';
+        showToast('Expense recorded', 'success');
+        loadManagementData();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteCashEntry(id) {
+    if (!confirm('Delete this cash entry?')) return;
+    const { doc, deleteDoc } = window.firebaseModules;
+    try {
+        await deleteDoc(doc(window.db, 'cashEntries', id));
+        showToast('Entry deleted', 'success');
+        loadManagementData();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function reconcileCashBox() {
+    const counted = parseInt(document.getElementById('mgmtCounted').value);
+    if (isNaN(counted) || counted < 0) return showToast('Enter the counted cash amount', 'error');
+    if (!CASH_TODAY) { await loadManagementData(); }
+    if (!getActiveStaff()) return showToast('Select staff first', 'error');
+    const expected = CASH_TODAY.expected;
+    const diff = counted - expected;
+
+    const box = document.getElementById('mgmtMatchResult');
+    box.style.display = 'block';
+    if (diff === 0) {
+        box.style.background = 'rgba(0,229,160,0.18)'; box.style.color = 'var(--success)';
+        box.innerHTML = `✅ MATCH — Box has exactly ₹${counted} as expected.`;
+    } else if (diff < 0) {
+        box.style.background = 'rgba(255,77,109,0.18)'; box.style.color = '#FF4D6D';
+        box.innerHTML = `⚠️ SHORTAGE of ₹${Math.abs(diff)} — Expected ₹${expected}, counted ₹${counted}.`;
+    } else {
+        box.style.background = 'rgba(255,149,0,0.18)'; box.style.color = '#FF9500';
+        box.innerHTML = `⚠️ EXCESS of ₹${diff} — Expected ₹${expected}, counted ₹${counted}.`;
+    }
+
+    // Persist the check for the admin report
+    const { collection, addDoc, serverTimestamp } = window.firebaseModules;
+    try {
+        await addDoc(collection(window.db, 'cashChecks'), {
+            counted, expected, diff,
+            opening: CASH_TODAY.opening, cashSales: CASH_TODAY.cashSales,
+            cashInTotal: CASH_TODAY.cashInTotal, expenseTotal: CASH_TODAY.expenseTotal,
+            date: CASH_TODAY.date, staffName: getActiveStaff(), createdAt: serverTimestamp()
+        });
+    } catch (e) { console.error('check save failed', e); }
+}
+
+// ── ADMIN CASH REPORT (by date) ──
+async function loadCashReport() {
+    const date = document.getElementById('cashReportDate').value;
+    if (!date) return;
+    const { collection, query, where, getDocs } = window.firebaseModules;
+    const sum = document.getElementById('cashReportSummary');
+    sum.innerHTML = '<p class="text-center" style="font-size:0.85rem;">Loading…</p>';
+
+    try {
+        const entriesSnap = await getDocs(query(collection(window.db, 'cashEntries'), where('date', '==', date)));
+        let opening = 0, cashInTotal = 0, expenseTotal = 0;
+        const expenses = [], cashIns = [];
+        entriesSnap.forEach(d => {
+            const e = { id: d.id, ...d.data() };
+            if (e.type === 'opening') opening = e.amount || 0;
+            else if (e.type === 'in') { cashInTotal += (e.amount || 0); cashIns.push(e); }
+            else if (e.type === 'out') { expenseTotal += (e.amount || 0); expenses.push(e); }
+        });
+
+        const cashSales = await computeCashSalesForDate(date);
+        const expected = opening + cashSales + cashInTotal - expenseTotal;
+
+        const checksSnap = await getDocs(query(collection(window.db, 'cashChecks'), where('date', '==', date)));
+        const checks = checksSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => tsMillis(b.createdAt) - tsMillis(a.createdAt));
+
+        sum.innerHTML = `
+            <div class="flex justify-between" style="font-size:0.9rem; margin-bottom:6px;"><span class="text-muted">Opening Balance</span><span>₹${opening}</span></div>
+            <div class="flex justify-between" style="font-size:0.9rem; margin-bottom:6px;"><span class="text-muted">+ Cash Sales</span><span style="color:var(--success);">₹${cashSales}</span></div>
+            <div class="flex justify-between" style="font-size:0.9rem; margin-bottom:6px;"><span class="text-muted">+ Manual Cash-In</span><span style="color:var(--success);">₹${cashInTotal}</span></div>
+            <div class="flex justify-between" style="font-size:0.9rem; margin-bottom:6px;"><span class="text-muted">− Expenses</span><span style="color:#FF6B6B;">₹${expenseTotal}</span></div>
+            <div class="flex justify-between font-bold" style="font-size:1.05rem; border-top:1px solid rgba(255,255,255,0.12); padding-top:8px; margin-top:4px;"><span>Expected in Box</span><span>₹${expected}</span></div>`;
+
+        document.getElementById('cashReportExpenses').innerHTML = expenses.length
+            ? expenses.sort((a, b) => tsMillis(b.createdAt) - tsMillis(a.createdAt)).map(e => `
+                <div class="flex justify-between" style="padding:7px 10px; border:1px solid var(--border, rgba(255,255,255,0.1)); border-radius:8px; margin-bottom:5px; font-size:0.85rem;">
+                    <span>${escAttr(e.category)}${e.note ? ' · ' + escAttr(e.note) : ''} <span class="text-muted">(${fmtClock(tsMillis(e.createdAt))}${e.staffName ? ' · ' + escAttr(e.staffName) : ''})</span></span>
+                    <strong style="color:#FF6B6B;">₹${e.amount}</strong>
+                </div>`).join('')
+            : '<p class="text-muted" style="font-size:0.85rem;">No expenses.</p>';
+
+        document.getElementById('cashReportCashIns').innerHTML = cashIns.length
+            ? cashIns.sort((a, b) => tsMillis(b.createdAt) - tsMillis(a.createdAt)).map(e => `
+                <div class="flex justify-between" style="padding:7px 10px; border:1px solid var(--border, rgba(255,255,255,0.1)); border-radius:8px; margin-bottom:5px; font-size:0.85rem;">
+                    <span>${e.note ? escAttr(e.note) : 'Cash-In'} <span class="text-muted">(${fmtClock(tsMillis(e.createdAt))}${e.staffName ? ' · ' + escAttr(e.staffName) : ''})</span></span>
+                    <strong style="color:var(--success);">₹${e.amount}</strong>
+                </div>`).join('')
+            : '<p class="text-muted" style="font-size:0.85rem;">No manual cash-ins.</p>';
+
+        document.getElementById('cashReportChecks').innerHTML = checks.length
+            ? checks.map(c => {
+                const color = c.diff === 0 ? 'var(--success)' : (c.diff < 0 ? '#FF4D6D' : '#FF9500');
+                const label = c.diff === 0 ? 'MATCH' : (c.diff < 0 ? `SHORT ₹${Math.abs(c.diff)}` : `EXCESS ₹${c.diff}`);
+                return `
+                <div class="flex justify-between" style="padding:7px 10px; border:1px solid var(--border, rgba(255,255,255,0.1)); border-radius:8px; margin-bottom:5px; font-size:0.85rem;">
+                    <span>Counted ₹${c.counted} / Expected ₹${c.expected} <span class="text-muted">(${fmtClock(tsMillis(c.createdAt))}${c.staffName ? ' · ' + escAttr(c.staffName) : ''})</span></span>
+                    <strong style="color:${color};">${label}</strong>
+                </div>`; }).join('')
+            : '<p class="text-muted" style="font-size:0.85rem;">No reconciliation checks.</p>';
+    } catch (e) {
+        console.error(e);
+        sum.innerHTML = `<p class="text-danger text-center">Error: ${e.message}</p>`;
+    }
+}
 
         window.onload = () => {
            
@@ -1293,6 +1750,8 @@ onMessage(messaging, (payload) => {
         async function checkUserRole(user) {
             // Load Store Settings for everyone (needed for bills)
             loadStoreSettings();
+            // Load operational staff roster (powers POS staff selector + admin staff list)
+            loadStaffRoster();
 
             const { doc, getDoc } = window.firebaseModules;
             try {
@@ -1450,7 +1909,7 @@ async function restoreCustomerSession(phone) {
 
         // --- ADMIN SETTINGS & TABS ---
         function switchAdminTab(tab) {
-            ['dashboard', 'menu', 'orders', 'settings', 'notify', 'inventory'].forEach(t => {
+            ['dashboard', 'menu', 'orders', 'settings', 'notify', 'inventory', 'cash'].forEach(t => {
                 const btn = document.getElementById(`btn-adm-${t}`);
                 const view = document.getElementById(`adm-view-${t}`);
                 if(btn) btn.classList.remove('active');
@@ -1486,6 +1945,12 @@ async function restoreCustomerSession(phone) {
         loadAdminIngredients();
         loadRecipeItemDropdown();
         loadRecipeIngredientDropdown();
+    }
+    if(tab === 'cash') {
+        renderAdminStaffList();
+        const cd = document.getElementById('cashReportDate');
+        if(!cd.value) cd.valueAsDate = new Date();
+        loadCashReport();
     }
 }
 
@@ -2453,8 +2918,15 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             const srcLabel = data.orderSource === 'customer' ? '📱 Customer App Order' : '🖥️ POS / Outlet Order';
             const srcHtml = `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">${srcLabel}</div>`;
             const typeHtml = `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">${orderTypeLabel(data.orderType)} Order</div>`;
+            let staffHtml = '';
+            if (data.staffName || data.billedBy) {
+                const parts = [];
+                if (data.staffName) parts.push(`Taken by 👤 ${data.staffName}`);
+                if (data.billedBy && data.billedBy !== data.staffName) parts.push(`Billed by 👤 ${data.billedBy}`);
+                staffHtml = `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">${parts.join(' · ')}</div>`;
+            }
 
-            document.getElementById('viewItemsList').innerHTML = itemsHtml + discountHtml + kotHtml + timingHtml + srcHtml + typeHtml;
+            document.getElementById('viewItemsList').innerHTML = itemsHtml + discountHtml + kotHtml + timingHtml + srcHtml + typeHtml + staffHtml;
 
             // Populate Payment
             document.getElementById('editTotal').value = data.finalPaid || data.total;
@@ -2930,9 +3402,10 @@ function removeEditCoupon() {
         function switchOutletTab(tab) {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.getElementById(`tab-${tab}`).classList.add('active');
-            ['view-pos', 'view-incoming', 'view-current', 'view-completed', 'view-stock'].forEach(v => document.getElementById(v).classList.add('hidden'));
+            ['view-pos', 'view-incoming', 'view-current', 'view-completed', 'view-stock', 'view-management'].forEach(v => document.getElementById(v).classList.add('hidden'));
             document.getElementById(`view-${tab}`).classList.remove('hidden');
             if(tab === 'stock') loadStockView();
+            if(tab === 'management') loadManagementData();
         }
 
 function filterMenu(text) {
@@ -3180,7 +3653,7 @@ function filterMenu(text) {
             const btn = document.getElementById('btnPlaceOrder');
             if (btn) { btn.disabled = true; btn.innerText = 'Placing...'; }
             try {
-                await submitOrder(phone, STATE.cart, 'pending', 'pos', STATE.orderType);
+                await submitOrder(phone, STATE.cart, 'pending', 'pos', STATE.orderType, getActiveStaff());
                 clearCart();
                 switchOutletTab('current');
             } catch(e) {
@@ -3210,7 +3683,7 @@ function filterMenu(text) {
             }
         }
 
-        async function submitOrder(phone, items, status, source='pos', orderType='dine-in') {
+        async function submitOrder(phone, items, status, source='pos', orderType='dine-in', staffName='') {
             const { addDoc, collection, serverTimestamp, doc, setDoc, getDoc } = window.firebaseModules;
             
             // IMPORTANT: Deep-copy items immediately so clearing the cart later
@@ -3279,7 +3752,8 @@ function filterMenu(text) {
                 stockFinalized: false,
                 kotStatus: null,        // KOT status: null | 'preparing' | 'completed'
                 orderSource: source,    // 'pos' | 'customer'
-                orderType: orderType    // 'dine-in' | 'delivery'
+                orderType: orderType,   // 'dine-in' | 'delivery'
+                staffName: staffName    // operational staff who took the order
                 });
             } catch(e) {
                 if (stockBlocked) {
@@ -4175,7 +4649,8 @@ async function deletePendingOrder(orderId) {
                         redeemed: redeem,
                         finalPaid: netPayable,
                         bonusEarned: newBonus,
-                        paymentMode: payMode
+                        paymentMode: payMode,
+                        billedBy: getActiveStaff()
                     };
 
                     // Add payment details based on mode
