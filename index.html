@@ -718,6 +718,9 @@ async function trackUserActivity(phone) {
     <label class="text-muted">Website / Promo Link</label>
     <input type="text" id="storeLink" class="input" placeholder="e.g. www.juicetherapy.com">
     
+    <label class="text-muted">Payment QR Image URL (for delivery)</label>
+    <input type="text" id="storeQrUrl" class="input" placeholder="e.g. https://raw.githubusercontent.com/user/repo/main/QR.jpg">
+    
     <button class="btn btn-primary w-full" onclick="saveStoreSettings()">💾 Save Settings</button>
 </div>
                 </div>
@@ -1014,13 +1017,20 @@ async function trackUserActivity(phone) {
                     </div>
                     <div class="cart-panel">
                         <h3>My Cart</h3>
+                        <div id="custEditBanner" class="hidden" style="background:rgba(255,193,7,0.15); border:1px solid var(--warning); color:var(--warning); padding:6px 10px; border-radius:6px; font-size:0.8rem; margin:6px 0;">✏️ Editing your pending order — update before it's accepted.</div>
+                        <div class="flex gap-2" style="margin:8px 0;">
+                            <button id="custTypeDineIn" class="btn btn-sm w-full btn-primary" onclick="setCustOrderType('dine-in')">🍽️ Dine-in</button>
+                            <button id="custTypeDelivery" class="btn btn-sm w-full btn-secondary" onclick="setCustOrderType('delivery')">🚚 Delivery</button>
+                        </div>
                         <div class="cart-items" id="custCartItems"></div>
                         <div style="border-top: 1px solid rgba(0,212,255,0.15); padding-top: 10px;">
                             <div class="flex justify-between font-bold" style="font-size: 1.2rem; margin-bottom: 10px;">
                                 <span>Total</span>
                                 <span id="custCartTotal">₹0</span>
                             </div>
-                            <button class="btn btn-primary w-full" onclick="placeCustomerOrder()">Request Order</button>
+                            <button id="btnCustPlaceOrder" class="btn btn-primary w-full" onclick="placeCustomerOrder()">Request Order</button>
+                            <button id="btnCustUpdateOrder" class="btn btn-warning w-full hidden" onclick="updateCustomerOrder()">✅ Update Order</button>
+                            <button id="btnCustCancelEdit" class="btn btn-secondary w-full hidden" style="margin-top:6px;" onclick="cancelCustEdit()">Cancel Edit</button>
                         </div>
                     </div>
                 </div>
@@ -1175,6 +1185,8 @@ async function trackUserActivity(phone) {
             editingOrderId: null,
             kitchenLockedItems: [], // items locked by kitchen (cannot reduce/remove)
             orderType: 'dine-in', // 'dine-in' | 'delivery' — set when taking an order
+            custOrderType: 'dine-in', // customer panel order type
+            custEditingOrderId: null, // id of the customer's own 'requested' order being edited
             staffRoster: [],      // operational staff names (managed from admin panel)
             activeStaff: '',      // currently selected staff handling the outlet POS
             activeCategory: 'All',
@@ -1287,7 +1299,8 @@ function updateOrderTypeButtons() {
 // Move one unit of an item between dine-in and parcel (dine-in orders only).
 // delta = +1 marks one more unit as parcel, -1 marks one fewer unit as parcel.
 function setItemParcel(itemId, delta) {
-    const item = STATE.cart.find(c => c.id === itemId);
+    const targetCart = STATE.role === 'customer' ? STATE.custCart : STATE.cart;
+    const item = targetCart.find(c => c.id === itemId);
     if (!item) return;
     let parcel = item.parcelQty || 0;
     parcel += delta;
@@ -1314,6 +1327,92 @@ function itemServeSegments(item, orderType) {
 // Short human label for an order's type.
 function orderTypeLabel(orderType) {
     return orderType === 'delivery' ? '🚚 Delivery' : '🍽️ Dine-in';
+}
+
+// ── Customer panel: Dine-in / Delivery selection ──
+function setCustOrderType(type) {
+    STATE.custOrderType = (type === 'delivery') ? 'delivery' : 'dine-in';
+    updateCustOrderTypeButtons();
+    if (typeof renderActiveCart === 'function') renderActiveCart();
+}
+function updateCustOrderTypeButtons() {
+    const d = document.getElementById('custTypeDineIn');
+    const v = document.getElementById('custTypeDelivery');
+    if (!d || !v) return;
+    const isDelivery = STATE.custOrderType === 'delivery';
+    d.className = 'btn btn-sm w-full ' + (isDelivery ? 'btn-secondary' : 'btn-primary');
+    v.className = 'btn btn-sm w-full ' + (isDelivery ? 'btn-primary' : 'btn-secondary');
+}
+
+// Resolve the QR image URL (Settings override, else QR.jpg sitting next to the app)
+function getPaymentQrUrl() {
+    const fromSettings = STATE.storeSettings && STATE.storeSettings.qrUrl;
+    if (fromSettings) return fromSettings;
+    try { return new URL('QR.jpg', window.location.href).href; }
+    catch (e) { return 'QR.jpg'; }
+}
+
+// After a customer places a DELIVERY order: open their WhatsApp to the outlet number
+// with the order summary + a Google Maps link to their current location (for distance check).
+async function sendDeliveryToOutletWhatsApp(items, total, phone, name) {
+    const outlet = (STATE.storeSettings && STATE.storeSettings.phone) || '9007952259';
+    const storeName = (STATE.storeSettings && STATE.storeSettings.name) || 'Juice Therapy Majherhati';
+
+    let locLine = '\n📍 Location: (please tap 📎 → Location to share)';
+    try {
+        const pos = await new Promise((resolve, reject) => {
+            if (!navigator.geolocation) return reject('no geo');
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000, enableHighAccuracy: true });
+        });
+        locLine = `\n📍 My location: https://maps.google.com/?q=${pos.coords.latitude},${pos.coords.longitude}`;
+    } catch (e) { /* permission denied / unavailable — keep manual-share line */ }
+
+    let msg = `🚚 *Delivery Order* — ${storeName}\n`;
+    msg += `Name: ${name || '-'}\nPhone: ${phone}\n--------------------------------\n`;
+    items.forEach(i => { msg += `${i.qty} x ${i.name} = ₹${i.price * i.qty}\n`; });
+    msg += `--------------------------------\nTotal: ₹${total}${locLine}\n\nPlease confirm delivery availability & distance.`;
+
+    const url = `https://wa.me/91${outlet}?text=${encodeURIComponent(msg)}`;
+    const win = window.open(url, '_blank');
+    if (!win) window.location.href = url; // popup blocked → navigate directly
+}
+
+// Customer can re-share an existing delivery order's details + location to the outlet
+// (used when the auto-redirect was cancelled/blocked at order time).
+async function resendDeliveryDetails(orderId) {
+    const { doc, getDoc } = window.firebaseModules;
+    try {
+        const snap = await getDoc(doc(window.db, 'orders', orderId));
+        if (!snap.exists()) return showToast('Order not found', 'error');
+        const o = snap.data();
+        showToast('Opening WhatsApp with your details & location…');
+        await sendDeliveryToOutletWhatsApp(o.items || [], o.total || 0, o.phone, o.customerName || '');
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// Outlet staff: send the payment QR image to a customer's WhatsApp (for prepaid orders).
+// Uses the Web Share API to share the actual image when supported, else falls back to a text link.
+async function sendDeliveryQR(phone, amount, name) {
+    const storeName = (STATE.storeSettings && STATE.storeSettings.name) || 'Juice Therapy Majherhati';
+    const qr = getPaymentQrUrl();
+    const caption = `Hello ${name || ''}\nPlease pay ₹${amount} for your ${storeName} order by scanning this QR. After paying, send the screenshot here to confirm. ✅`;
+    try {
+        showToast('Preparing QR image…', 'info');
+        const resp = await fetch(qr);
+        const blob = await resp.blob();
+        const file = new File([blob], 'QR.jpg', { type: blob.type || 'image/jpeg' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], text: caption });
+            return;
+        }
+        throw new Error('share-unsupported');
+    } catch (e) {
+        // Fallback: open WhatsApp with the QR link as text
+        const msg = `${caption}\nQR: ${qr}`;
+        const url = `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`;
+        const win = window.open(url, '_blank');
+        if (!win) window.location.href = url;
+    }
 }
 
 // ==========================================
@@ -2009,6 +2108,7 @@ document.getElementById('storeUpi').value = s.upi || '';
                 document.getElementById('storeCloseTime').value = s.closeTime || '';
                 document.getElementById('storeFooter').value = s.footer || '';
                 document.getElementById('storeLink').value = s.link || '';
+                if(document.getElementById('storeQrUrl')) document.getElementById('storeQrUrl').value = s.qrUrl || '';
                 
                 // Toggle Switch Logic
                 const check = document.getElementById('storeIsOpen');
@@ -2065,7 +2165,8 @@ document.getElementById('storeUpi').value = s.upi || '';
         closeTime: document.getElementById('storeCloseTime').value,
         isOpen: isOpen,
         footer: document.getElementById('storeFooter').value,
-        link: document.getElementById('storeLink').value
+        link: document.getElementById('storeLink').value,
+        qrUrl: document.getElementById('storeQrUrl').value
     };
     
     try {
@@ -3586,7 +3687,8 @@ function filterMenu(text) {
 
                 // Per-item Dine-in / Parcel split (POS cart, dine-in orders only)
                 const isOutletCart = container.id === 'cartItemsList';
-                const showParcel = isOutletCart && STATE.role !== 'customer' && STATE.orderType === 'dine-in';
+                const isCustCart = container.id === 'custCartItems';
+                const showParcel = (isOutletCart && STATE.role !== 'customer' && STATE.orderType === 'dine-in') || (isCustCart && STATE.custOrderType === 'dine-in');
                 const parcelQty = Math.min(item.parcelQty || 0, item.qty);
                 const dineQty = item.qty - parcelQty;
                 const parcelControl = showParcel ? `
@@ -3669,15 +3771,115 @@ function filterMenu(text) {
             if (isSubmitting) return showToast('Order is being placed, please wait...', 'error');
             if(STATE.custCart.length === 0) return showToast('Cart is empty', 'error');
             isSubmitting = true;
+            const orderType = STATE.custOrderType || 'dine-in';
+            const itemsForMsg = JSON.parse(JSON.stringify(STATE.custCart));
+            const totalForMsg = itemsForMsg.reduce((s, i) => s + (i.price * i.qty), 0);
+            const custName = (STATE.user && STATE.user.name) || document.getElementById('custNameDisplay')?.innerText || '';
             try {
-                await submitOrder(STATE.user.phone, STATE.custCart, 'requested', 'customer');
+                await submitOrder(STATE.user.phone, STATE.custCart, 'requested', 'customer', orderType);
                 STATE.custCart = [];
+                STATE.custOrderType = 'dine-in';
+                updateCustOrderTypeButtons();
                 renderActiveCart();
-                showToast('Order Request Sent');
                 switchCustTab('history');
+                if (orderType === 'delivery') {
+                    showToast('Delivery request sent — opening WhatsApp…');
+                    sendDeliveryToOutletWhatsApp(itemsForMsg, totalForMsg, STATE.user.phone, custName);
+                } else {
+                    showToast('Order Request Sent');
+                }
             } catch(e) {
                 console.error(e);
                 showToast('Order failed: ' + (e.message || e), 'error');
+            } finally {
+                isSubmitting = false;
+            }
+        }
+
+        // ── Customer: edit own order while still 'requested' (not yet accepted) ──
+        function updateCustEditUI() {
+            const editing = !!STATE.custEditingOrderId;
+            document.getElementById('btnCustPlaceOrder').classList.toggle('hidden', editing);
+            document.getElementById('btnCustUpdateOrder').classList.toggle('hidden', !editing);
+            document.getElementById('btnCustCancelEdit').classList.toggle('hidden', !editing);
+            document.getElementById('custEditBanner').classList.toggle('hidden', !editing);
+        }
+        async function editCustomerOrder(orderId) {
+            const { doc, getDoc } = window.firebaseModules;
+            try {
+                const snap = await getDoc(doc(window.db, 'orders', orderId));
+                if (!snap.exists()) return showToast('Order not found', 'error');
+                const data = snap.data();
+                if (data.status !== 'requested') return showToast('Order already accepted — can no longer edit.', 'error');
+                STATE.custCart = (data.items || []).map(it => ({ ...it, parcelQty: it.parcelQty || 0 }));
+                STATE.custEditingOrderId = orderId;
+                STATE.custOrderType = data.orderType || 'dine-in';
+                updateCustOrderTypeButtons();
+                updateCustEditUI();
+                switchCustTab('menu');
+                renderActiveCart();
+                showToast('Editing your order — change items, then tap Update');
+            } catch (e) { showToast('Error: ' + e.message, 'error'); }
+        }
+        function cancelCustEdit() {
+            STATE.custEditingOrderId = null;
+            STATE.custCart = [];
+            STATE.custOrderType = 'dine-in';
+            updateCustOrderTypeButtons();
+            updateCustEditUI();
+            renderActiveCart();
+            switchCustTab('history');
+        }
+        async function updateCustomerOrder() {
+            if (!STATE.custEditingOrderId) return;
+            if (STATE.custCart.length === 0) return showToast('Cart is empty', 'error');
+            if (isSubmitting) return showToast('Please wait…', 'error');
+            isSubmitting = true;
+            const { doc, runTransaction } = window.firebaseModules;
+            const orderType = STATE.custOrderType || 'dine-in';
+            const itemsSnapshot = JSON.parse(JSON.stringify(STATE.custCart));
+            itemsSnapshot.forEach(it => {
+                if (orderType === 'delivery') it.parcelQty = 0;
+                else it.parcelQty = Math.min(Math.max(it.parcelQty || 0, 0), it.qty || 0);
+            });
+            const total = itemsSnapshot.reduce((s, i) => s + (i.price * i.qty), 0);
+            let oldItems = [], oldModel = 'reserved-v2', wasBlocked = false;
+            try {
+                const orderRef = doc(window.db, 'orders', STATE.custEditingOrderId);
+                // Atomically verify the order is still 'requested' and swap the items.
+                // If staff accepts mid-edit, the transaction throws BEFORE any stock is touched.
+                await runTransaction(window.db, async (t) => {
+                    const snap = await t.get(orderRef);
+                    if (!snap.exists()) throw new Error('Order not found');
+                    const data = snap.data();
+                    if (data.status !== 'requested') throw new Error('Order already accepted — cannot edit.');
+                    oldItems = data.items || [];
+                    oldModel = data.stockModel || 'reserved-v2';
+                    wasBlocked = !!data.stockBlocked;
+                    t.update(orderRef, {
+                        items: itemsSnapshot,
+                        subtotal: total,
+                        total: total,
+                        orderType: orderType,
+                        stockBlocked: true,
+                        stockModel: 'reserved-v2'
+                    });
+                });
+
+                if (wasBlocked) await releaseIngredientStock(oldItems, oldModel);
+                await blockIngredientStock(itemsSnapshot);
+
+                STATE.custEditingOrderId = null;
+                STATE.custCart = [];
+                STATE.custOrderType = 'dine-in';
+                updateCustOrderTypeButtons();
+                updateCustEditUI();
+                renderActiveCart();
+                switchCustTab('history');
+                showToast('Order updated ✅');
+            } catch (e) {
+                console.error(e);
+                showToast('Update failed: ' + (e.message || e), 'error');
             } finally {
                 isSubmitting = false;
             }
@@ -3920,12 +4122,29 @@ const customerDisplay = o.customerName
     ? `<strong>${o.customerName}</strong> <span style="font-weight:normal; font-size:0.8rem">(${o.phone})</span>${callBtn}`
     : `<strong>${o.phone}</strong>${callBtn}`;
 
+                const isDelivery = o.orderType === 'delivery';
+                const safeName = (o.customerName || '').replace(/'/g, "\\'");
+                const typeBadge = `<span style="font-size:0.65rem; margin-left:6px; padding:1px 6px; border-radius:4px; background:rgba(0,212,255,0.18); color:var(--primary); font-weight:700;">${orderTypeLabel(o.orderType)}</span>`;
+                // "Accept (Paid)" opens the payment modal so the order is COMPLETED directly
+                // (skips pending → can't be lost/deleted as an unpaid pending order).
+                const pendingLabel = isDelivery ? '💵 Accept (COD)' : '🍽️ Accept (Pay later)';
+                const buttonRow = `
+                    <div class="flex gap-2" style="margin-top:10px;">
+                        <button class="btn btn-sm w-full" style="background:#25D366; color:#000; border:none;" onclick="sendDeliveryQR('${o.phone}', ${o.total}, '${safeName}')">📤 Send QR</button>
+                        <button class="btn btn-success btn-sm w-full" onclick="openPaymentModal('${o.id}', ${o.total}, '${o.phone}')">✅ Accept (Paid)</button>
+                    </div>
+                    <div class="flex gap-2" style="margin-top:6px;">
+                        <button class="btn btn-secondary btn-sm w-full" onclick="updateOrderStatus('${o.id}', 'pending')">${pendingLabel}</button>
+                        <button class="btn btn-danger btn-sm w-full" onclick="updateOrderStatus('${o.id}', 'cancelled')">Reject</button>
+                    </div>`;
+
                 return `
                 <div class="order-card">
                     <div class="flex justify-between" style="align-items:center; margin-bottom:8px;">
                         <div>
                             <span class="order-status status-requested">REQUESTED</span>
                             <span class="text-muted" style="font-size:0.75rem;">${timeStr}</span>
+                            ${typeBadge}
                         </div>
                         <strong style="font-size:1.1rem;">₹${o.total}</strong>
                     </div>
@@ -3936,10 +4155,7 @@ const customerDisplay = o.customerName
                         ${o.items.map(i => `${i.qty}x ${i.name}`).join(', ')}
                     </div>
                     
-                    <div class="flex gap-2" style="margin-top:10px;">
-                        <button class="btn btn-success w-full" onclick="updateOrderStatus('${o.id}', 'pending')">Accept</button>
-                        <button class="btn btn-danger w-full" onclick="updateOrderStatus('${o.id}', 'cancelled')">Reject</button>
-                    </div>
+                    ${buttonRow}
                 </div>
             `}).join('');
         }
@@ -4864,6 +5080,7 @@ function filterCustomerMenu(text) {
 
                 list.innerHTML = sortedDocs.map(d => {
                     const o = d.data();
+                    const id = d.id;
                     let stClass = 'status-pending';
                     if (o.status === 'completed') stClass = 'status-completed';
                     else if (o.status === 'requested') stClass = 'status-requested';
@@ -4885,8 +5102,14 @@ function filterCustomerMenu(text) {
                                 <div style="font-weight:bold; font-size:1.1rem;">₹${o.total}</div>
                             </div>
                             <div class="text-muted" style="font-size:0.85rem; border-top:1px solid rgba(15,39,68,0.90); padding-top:8px;">
-                                ${o.items.map(i => `${i.qty} x ${i.name}`).join(', ')}
+                                ${o.items.map(i => { const p=(o.orderType!=='delivery')?(i.parcelQty||0):0; return `${i.qty} x ${i.name}${o.orderType==='delivery'?' 🚚':(p>0?` 📦${p}`:'')}`; }).join(', ')}
                             </div>
+                            <div style="margin-top:6px; font-size:0.72rem; color:var(--primary); font-weight:600;">${orderTypeLabel(o.orderType)}</div>
+                            ${(o.status === 'requested' || (o.orderType === 'delivery' && o.status === 'pending')) ? `
+                            <div class="flex gap-2" style="margin-top:8px;">
+                                ${o.status === 'requested' ? `<button class="btn btn-warning btn-sm w-full" onclick="editCustomerOrder('${id}')">✏️ Edit Order</button>` : ''}
+                                ${(o.orderType === 'delivery' && (o.status === 'requested' || o.status === 'pending')) ? `<button class="btn btn-sm w-full" style="background:#25D366; color:#000; border:none;" onclick="resendDeliveryDetails('${id}')">📍 Send Location & Details</button>` : ''}
+                            </div>` : ''}
                         </div>
                     `;
                 }).join('');
