@@ -1863,23 +1863,92 @@ onMessage(messaging, (payload) => {
                     loadAnalytics();
                 } else {
                     STATE.role = 'staff';
-                    showPanel('outletPanel');
-                    loadCategories();
-                    loadMenu();
-                    loadOrders(); 
+                    // Outlet POS is gated by location — only opens at the shop.
+                    gateOutletPanel(() => { loadCategories(); loadMenu(); loadOrders(); });
                 }
             } catch (e) {
                 STATE.role = 'staff';
-                showPanel('outletPanel');
-                loadCategories();
-                loadMenu();
-                loadOrders(); 
+                gateOutletPanel(() => { loadCategories(); loadMenu(); loadOrders(); });
             }
         }
 
         function showPanel(panelId) {
             ['loginScreen', 'adminPanel', 'outletPanel', 'customerPanel'].forEach(id => document.getElementById(id).classList.add('hidden'));
             document.getElementById(panelId).classList.remove('hidden');
+        }
+
+        // ── OUTLET POS LOCATION GATE (staff outlet only; admin & customer NOT gated) ──
+        // The Outlet POS opens only when the device is physically at the shop.
+        // NOTE: browser geolocation needs HTTPS (a secure context) — it will not
+        // work when the app is opened from a downloaded file (file:///).
+        const OUTLET_SHOP_LAT  = 22.66259288943178;   // Nimta Outlet
+        const OUTLET_SHOP_LNG  = 88.40855189654023;
+        const OUTLET_GEOFENCE_M = 150;                 // allowed distance in metres
+        let _pendingOutletLoad = null;
+
+        function _distMeters(la1, lo1, la2, lo2) {
+            const R = 6371000, tr = d => d * Math.PI / 180;
+            const dLa = tr(la2 - la1), dLo = tr(lo2 - lo1);
+            const a = Math.sin(dLa / 2) ** 2 + Math.cos(tr(la1)) * Math.cos(tr(la2)) * Math.sin(dLo / 2) ** 2;
+            return 2 * R * Math.asin(Math.sqrt(a));
+        }
+        function _getPos() {
+            return new Promise((res, rej) => {
+                if (!navigator.geolocation) return rej(new Error('no-geo'));
+                navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+            });
+        }
+        async function outletLocationCheck() {
+            try {
+                const pos = await _getPos();
+                const d = _distMeters(pos.coords.latitude, pos.coords.longitude, OUTLET_SHOP_LAT, OUTLET_SHOP_LNG);
+                return { ok: d <= OUTLET_GEOFENCE_M, dist: d };
+            } catch (e) { return { ok: false, dist: null, err: e }; }
+        }
+        function showOutletLock(html, showRetry) {
+            let el = document.getElementById('outletLocLock');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'outletLocLock';
+                el.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:#070D1A;padding:24px;text-align:center;';
+                document.body.appendChild(el);
+            }
+            el.style.display = 'flex';
+            el.innerHTML = `<div style="max-width:360px;">
+                <div style="font-size:3rem;margin-bottom:12px;">📍</div>
+                <div style="font-size:1.1rem;font-weight:700;color:#00D4FF;margin-bottom:10px;">Outlet POS — Location Check</div>
+                <div style="font-size:0.92rem;color:#c9dbe8;line-height:1.5;margin-bottom:18px;">${html}</div>
+                ${showRetry ? `<button onclick="gateOutletPanel()" style="background:#00D4FF;color:#062634;border:none;padding:12px 22px;border-radius:8px;font-weight:700;font-size:1rem;cursor:pointer;">🔄 Retry — I'm at the shop</button>
+                <button onclick="outletLockLogout()" style="display:block;margin:14px auto 0;background:transparent;color:#7f95a8;border:none;font-size:0.82rem;cursor:pointer;">Log out</button>` : ''}
+            </div>`;
+        }
+        function hideOutletLock() {
+            const el = document.getElementById('outletLocLock');
+            if (el) el.style.display = 'none';
+        }
+        function outletLockLogout() {
+            hideOutletLock();
+            try { window.firebaseModules.signOut(window.auth); } catch (e) {}
+        }
+        // Gate the outlet panel behind being at the shop, then run its loaders.
+        async function gateOutletPanel(loadFn) {
+            if (loadFn) _pendingOutletLoad = loadFn;
+            showOutletLock('📍 Checking your location…', false);
+            const r = await outletLocationCheck();
+            if (r.ok) {
+                hideOutletLock();
+                showPanel('outletPanel');
+                if (_pendingOutletLoad) _pendingOutletLoad();
+            } else {
+                let msg;
+                if (r.dist != null) {
+                    msg = `⛔ You are <b>${Math.round(r.dist)} m</b> from the shop.<br>The Outlet POS opens only at the shop.`;
+                } else {
+                    msg = '⚠️ Could not get your location. Allow location access and retry.';
+                    if (!window.isSecureContext) msg += '<br><small>⚠️ Open the app over https (not a downloaded file).</small>';
+                }
+                showOutletLock(msg, true);
+            }
         }
 
         function setLoginMode(mode) {
