@@ -4935,13 +4935,19 @@ async function deletePendingOrder(orderId) {
                     // Reconcile non-expired points from the lot ledger
                     const custDataForPts = custDoc.exists() ? custDoc.data() : {};
                     const reconciled = reconcilePointLots(custDataForPts);
-                    if (redeem > reconciled.available) throw "Insufficient points!";
+
+                    // AUTHORITATIVE delivery check from the saved order (not PAYMENT_DATA,
+                    // which is set asynchronously and could be stale on a fast confirm).
+                    // Delivery orders NEVER redeem points and NEVER earn bonus.
+                    const orderIsDelivery = (orderData.orderType === 'delivery');
+                    const effRedeem = orderIsDelivery ? 0 : redeem;
+                    if (effRedeem > reconciled.available) throw "Insufficient points!";
 
                     // Delivery orders earn NO bonus; dine-in earns 5% valid for POINT_VALIDITY_DAYS
-                    const newBonus = isDelivery ? 0 : Math.floor(netPayable * 0.05);
+                    const newBonus = orderIsDelivery ? 0 : Math.floor(netPayable * 0.05);
 
                     // Consume redeemed points (earliest-expiring first), then add the new bonus lot
-                    let updatedLots = consumePointLots(reconciled.lots, redeem);
+                    let updatedLots = consumePointLots(reconciled.lots, effRedeem);
                     if (newBonus > 0) {
                         updatedLots.push({ amount: newBonus, expiresAt: Date.now() + POINT_VALIDITY_DAYS * 86400000 });
                     }
@@ -4955,7 +4961,7 @@ async function deletePendingOrder(orderId) {
                     // Prepare order update data
                     const orderUpdate = {
                         status: 'completed',
-                        redeemed: redeem,
+                        redeemed: effRedeem,
                         finalPaid: netPayable,
                         bonusEarned: newBonus,
                         paymentMode: payMode,
