@@ -372,7 +372,10 @@ async function trackUserActivity(phone) {
                     <img src="logo.png" style="height:30px;"> 
                     <h2>Admin Dashboard</h2>
                 </div>
-                <button class="btn btn-danger btn-sm" onclick="logout()">Logout</button>
+                <div class="flex gap-2">
+                    <button class="btn btn-secondary btn-sm" onclick="enterPosView()" title="Open the Outlet POS (no location check for admin)">🛒 POS View</button>
+                    <button class="btn btn-danger btn-sm" onclick="logout()">Logout</button>
+                </div>
             </div>
         </header>
         <div class="app-layout">
@@ -783,6 +786,7 @@ async function trackUserActivity(phone) {
     </div>
     
     <div class="flex gap-2">
+        <button id="btnBackToAdmin" class="btn btn-secondary btn-sm hidden" onclick="exitPosView()" title="Return to Admin Dashboard">← Admin</button>
         <select id="posStaffSelect" class="input" onchange="setActiveStaff(this.value)" style="margin:0; padding:6px 10px; font-size:0.85rem; max-width:160px;" title="Who is handling the POS">
             <option value="">👤 Select Staff</option>
         </select>
@@ -1949,6 +1953,26 @@ onMessage(messaging, (payload) => {
                 }
                 showOutletLock(msg, true);
             }
+        }
+
+        // Admin can open the Outlet POS from the Admin Dashboard WITHOUT a location
+        // check (admin is trusted and isn't always at the shop). Regular staff still
+        // go through the location gate at login.
+        let _posViewInit = false;
+        function enterPosView() {
+            STATE.role = 'staff';                 // so the outlet POS renders & behaves correctly
+            showPanel('outletPanel');             // no location gate for admin
+            if (!_posViewInit) { loadOrders(); _posViewInit = true; }
+            if (typeof renderOutletMenu === 'function') renderOutletMenu();
+            const back = document.getElementById('btnBackToAdmin');
+            if (back) back.classList.remove('hidden');
+        }
+        function exitPosView() {
+            STATE.role = 'admin';
+            const back = document.getElementById('btnBackToAdmin');
+            if (back) back.classList.add('hidden');
+            showPanel('adminPanel');
+            if (typeof renderAdminMenu === 'function') renderAdminMenu();
         }
 
         function setLoginMode(mode) {
