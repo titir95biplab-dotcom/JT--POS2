@@ -4086,23 +4086,50 @@ function filterMenu(text) {
             const ctx = _ensureAudio();
             if (!ctx) return;
             const now = ctx.currentTime;
-            const tones = [[900, 0], [1300, 0.18], [900, 0.36], [1300, 0.54]]; // two-tone siren
-            tones.forEach(([f, t]) => {
-                const o = ctx.createOscillator(), g = ctx.createGain();
-                o.type = 'square';
-                o.frequency.value = f;
-                g.gain.setValueAtTime(0.0001, now + t);
-                g.gain.exponentialRampToValueAtTime(0.6, now + t + 0.02);
-                g.gain.exponentialRampToValueAtTime(0.0001, now + t + 0.16);
-                o.connect(g); g.connect(ctx.destination);
-                o.start(now + t); o.stop(now + t + 0.18);
-            });
-            if (navigator.vibrate) navigator.vibrate([250, 120, 250]);
+            const dur = 0.75;
+
+            // Compressor at the end → maximises perceived loudness (very loud)
+            const comp = ctx.createDynamicsCompressor();
+            comp.threshold.value = -28; comp.knee.value = 6; comp.ratio.value = 20;
+            comp.attack.value = 0.001; comp.release.value = 0.12;
+            const master = ctx.createGain();
+            master.gain.value = 1.0;            // hot → intentional clipping for a nasty, harsh edge
+            master.connect(comp); comp.connect(ctx.destination);
+
+            // 1) Sweeping siren (rise→fall) — odd UFO/air-raid feel
+            const o1 = ctx.createOscillator(), g1 = ctx.createGain();
+            o1.type = 'sawtooth';
+            o1.frequency.setValueAtTime(480, now);
+            o1.frequency.linearRampToValueAtTime(1650, now + dur * 0.5);
+            o1.frequency.linearRampToValueAtTime(380, now + dur);
+            g1.gain.value = 0.55; o1.connect(g1); g1.connect(master);
+
+            // 2) Dissonant clash (tritone-ish) + fast warble → the "odd" part
+            const o2 = ctx.createOscillator(), g2 = ctx.createGain();
+            o2.type = 'square';
+            o2.frequency.setValueAtTime(690, now);
+            o2.frequency.linearRampToValueAtTime(2300, now + dur * 0.5);
+            o2.frequency.linearRampToValueAtTime(540, now + dur);
+            g2.gain.value = 0.45;
+            const lfo = ctx.createOscillator(), lfoG = ctx.createGain();
+            lfo.type = 'square'; lfo.frequency.value = 15;   // fast tremolo warble
+            lfoG.gain.value = 0.4; lfo.connect(lfoG); lfoG.connect(g2.gain);
+            o2.connect(g2); g2.connect(master);
+
+            // 3) Low growl for body & extra loudness
+            const o3 = ctx.createOscillator(), g3 = ctx.createGain();
+            o3.type = 'square'; o3.frequency.value = 110; g3.gain.value = 0.35;
+            o3.connect(g3); g3.connect(master);
+
+            [o1, o2, o3, lfo].forEach(o => o.start(now));
+            [o1, o2, o3, lfo].forEach(o => o.stop(now + dur));
+
+            if (navigator.vibrate) navigator.vibrate([400, 80, 400, 80, 400]);
         }
         function startDeliveryAlarm() {
             if (_alarmTimer) return;
             _alarmBeep();
-            _alarmTimer = setInterval(_alarmBeep, 900);
+            _alarmTimer = setInterval(_alarmBeep, 780);
             const btn = document.getElementById('stopAlarmBtn');
             if (btn) btn.classList.remove('hidden');
         }
