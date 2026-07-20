@@ -232,6 +232,7 @@ async function trackUserActivity(phone) {
         .order-card { padding: 15px; background: rgba(0,212,255,0.06); border: 1px solid rgba(15,39,68,0.90); margin-bottom: 10px; border-radius: 8px; }
         .order-status { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; font-weight: bold; }
         .status-requested { background: var(--info); color: white; }
+        @keyframes alarmPulse { 0%,100% { transform:translateX(-50%) scale(1); } 50% { transform:translateX(-50%) scale(1.08); } }
         .status-pending { background: var(--warning); color: black; }
         .status-completed { background: var(--success); color: white; }
         .status-cancelled { background: var(--danger); color: white; }
@@ -778,6 +779,10 @@ async function trackUserActivity(phone) {
     </div>
 
     <div id="outletPanel" class="hidden">
+        <button id="stopAlarmBtn" class="hidden" onclick="stopDeliveryAlarm()"
+            style="position:fixed; left:50%; transform:translateX(-50%); bottom:24px; z-index:99998; background:#E53935; color:#fff; border:none; padding:16px 26px; border-radius:40px; font-size:1.05rem; font-weight:800; box-shadow:0 6px 22px rgba(229,57,53,0.6); cursor:pointer; animation:alarmPulse 0.8s infinite; letter-spacing:0.3px;">
+            🔕 STOP ALARM — New Delivery!
+        </button>
         <header>
             <div class="header-content">
     <div class="flex items-center gap-2">
@@ -1968,6 +1973,7 @@ onMessage(messaging, (payload) => {
             if (back) back.classList.remove('hidden');
         }
         function exitPosView() {
+            stopDeliveryAlarm();
             STATE.role = 'admin';
             const back = document.getElementById('btnBackToAdmin');
             if (back) back.classList.add('hidden');
@@ -4059,6 +4065,72 @@ function filterMenu(text) {
             }
         }
 
+        // ── DELIVERY ALARM (Outlet POS only) ──────────────────────────
+        // A loud, repeating siren fires when a NEW delivery request arrives,
+        // and keeps ringing until the staff taps "Stop Alarm" or the request
+        // is handled (accepted/rejected). Admin dashboard & customer are silent.
+        let _alarmTimer = null;
+        let _alarmCtx = null;
+        let _seenDeliveryReqs = null;   // null = not seeded yet (don't ring for pre-existing on load)
+
+        function _ensureAudio() {
+            if (!_alarmCtx) {
+                const AC = window.AudioContext || window.webkitAudioContext;
+                if (!AC) return null;
+                _alarmCtx = new AC();
+            }
+            if (_alarmCtx.state === 'suspended') _alarmCtx.resume();
+            return _alarmCtx;
+        }
+        function _alarmBeep() {
+            const ctx = _ensureAudio();
+            if (!ctx) return;
+            const now = ctx.currentTime;
+            const tones = [[900, 0], [1300, 0.18], [900, 0.36], [1300, 0.54]]; // two-tone siren
+            tones.forEach(([f, t]) => {
+                const o = ctx.createOscillator(), g = ctx.createGain();
+                o.type = 'square';
+                o.frequency.value = f;
+                g.gain.setValueAtTime(0.0001, now + t);
+                g.gain.exponentialRampToValueAtTime(0.6, now + t + 0.02);
+                g.gain.exponentialRampToValueAtTime(0.0001, now + t + 0.16);
+                o.connect(g); g.connect(ctx.destination);
+                o.start(now + t); o.stop(now + t + 0.18);
+            });
+            if (navigator.vibrate) navigator.vibrate([250, 120, 250]);
+        }
+        function startDeliveryAlarm() {
+            if (_alarmTimer) return;
+            _alarmBeep();
+            _alarmTimer = setInterval(_alarmBeep, 900);
+            const btn = document.getElementById('stopAlarmBtn');
+            if (btn) btn.classList.remove('hidden');
+        }
+        function stopDeliveryAlarm() {
+            if (_alarmTimer) { clearInterval(_alarmTimer); _alarmTimer = null; }
+            const btn = document.getElementById('stopAlarmBtn');
+            if (btn) btn.classList.add('hidden');
+            if (navigator.vibrate) navigator.vibrate(0);
+        }
+        function checkDeliveryAlarm(requestedOrders) {
+            const outlet = document.getElementById('outletPanel');
+            const inOutlet = outlet && !outlet.classList.contains('hidden');
+            const ids = requestedOrders.filter(o => o.orderType === 'delivery').map(o => o.id);
+
+            // First snapshot after login: remember current ones WITHOUT ringing.
+            if (_seenDeliveryReqs === null) { _seenDeliveryReqs = new Set(ids); return; }
+
+            // No delivery requests left → auto-stop.
+            if (ids.length === 0) { _seenDeliveryReqs = new Set(); stopDeliveryAlarm(); return; }
+
+            const hasNew = ids.some(id => !_seenDeliveryReqs.has(id));
+            _seenDeliveryReqs = new Set(ids);
+            if (hasNew && inOutlet) startDeliveryAlarm();
+        }
+        // Unlock audio on the first user interaction (browsers block sound until a gesture).
+        document.addEventListener('click', _ensureAudio, { once: true });
+        document.addEventListener('touchstart', _ensureAudio, { once: true });
+
         function loadOrders() {
     const { collection, query, orderBy, onSnapshot, where, Timestamp } = window.firebaseModules;
     
@@ -4095,6 +4167,7 @@ function filterMenu(text) {
         // Filter 1: Incoming Requests
         const requested = orders.filter(o => o.status === 'requested');
         renderIncoming(requested);
+        checkDeliveryAlarm(requested);
         
         // Filter 2: Pending Orders
         const pending = orders.filter(o => o.status === 'pending');
