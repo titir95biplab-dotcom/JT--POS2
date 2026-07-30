@@ -12,6 +12,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- SheetJS: used to build real .xlsx files for the sales & cash reports -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script type="module">
         // 1. UPDATE THIS IMPORT LINE (Added 'getCountFromServer')
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
@@ -449,6 +451,23 @@ async function trackUserActivity(phone) {
         <h4 style="margin-bottom:8px;">✓ Reconciliation Checks</h4>
         <div id="cashReportChecks"></div>
     </div>
+
+    <!-- ── CASH HISTORY (date range) ── -->
+    <div class="card" style="margin-top:16px;">
+        <div class="flex justify-between items-center" style="margin-bottom:6px; flex-wrap:wrap; gap:8px;">
+            <h3 style="margin:0;">📆 Cash History</h3>
+            <div class="flex items-center gap-2" style="flex-wrap:wrap;">
+                <input type="date" id="cashHistFrom" class="input" style="margin:0; padding:6px 8px; font-size:0.85rem;">
+                <input type="date" id="cashHistTo" class="input" style="margin:0; padding:6px 8px; font-size:0.85rem;">
+                <button class="btn btn-secondary btn-sm" onclick="loadCashHistory()">Load</button>
+                <button class="btn btn-success btn-sm" onclick="exportCashHistoryExcel()">⬇️ Excel</button>
+            </div>
+        </div>
+        <p class="text-muted" style="font-size:0.78rem; margin-bottom:12px;">Day-by-day record of every past cash day — opening balance, cash sales, manual cash-in, expenses, expected vs counted.</p>
+        <div id="cashHistoryResult">
+            <p class="text-muted text-center" style="font-size:0.85rem;">Pick a date range and tap Load.</p>
+        </div>
+    </div>
 </div>
 <!-- ADMIN INVENTORY VIEW — Dynamic Recipe System -->
 <div id="adm-view-inventory" class="hidden">
@@ -574,6 +593,12 @@ async function trackUserActivity(phone) {
                 <input type="date" id="dashEnd" class="input" style="margin:0;">
             </div>
             <button class="btn btn-primary" onclick="loadAnalytics()">Go</button>
+        </div>
+
+        <div class="flex gap-2" style="margin: 0 0 15px 0; flex-wrap:wrap;">
+            <button class="btn btn-sm btn-success" onclick="exportDailySalesExcel()" title="Date-wise sales for the selected range">📅 Export Daily Sales</button>
+            <button class="btn btn-sm btn-success" onclick="exportItemSalesExcel()" title="Item-wise quantity sold (highest first)">🍹 Export Item-wise Sales</button>
+            <span class="text-muted" style="font-size:0.75rem; align-self:center;">Uses the From / To dates above · downloads .xlsx</span>
         </div>
 
         <div class="grid-4" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:10px;">
@@ -1812,6 +1837,315 @@ async function loadCashReport() {
     }
 }
 
+// ══════════════════════════════════════════════════════════════
+//  REPORTS & EXCEL EXPORT (admin)
+// ══════════════════════════════════════════════════════════════
+
+// Local (not UTC) YYYY-MM-DD — important for IST, where toISOString() can
+// push late-evening orders onto the previous day.
+function _localDateStr(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function _xlsxReady() {
+    if (typeof XLSX === 'undefined') {
+        showToast('Excel library not loaded — check your internet and reload.', 'error');
+        return false;
+    }
+    return true;
+}
+
+function _saveWorkbook(sheets, filename) {
+    const wb = XLSX.utils.book_new();
+    sheets.forEach(s => {
+        const ws = XLSX.utils.aoa_to_sheet(s.rows);
+        if (s.widths) ws['!cols'] = s.widths.map(w => ({ wch: w }));
+        XLSX.utils.book_append_sheet(wb, ws, s.name);
+    });
+    XLSX.writeFile(wb, filename);
+}
+
+// Read + validate the Analytics From/To range
+function _dashRange() {
+    const s = document.getElementById('dashStart').value;
+    const e = document.getElementById('dashEnd').value;
+    if (!s || !e) { showToast('Please select From and To dates', 'error'); return null; }
+    if (s > e) { showToast('From date must be before To date', 'error'); return null; }
+    const start = new Date(s + 'T00:00:00');
+    const end = new Date(e + 'T23:59:59.999');
+    return { s, e, start, end };
+}
+
+// All COMPLETED orders inside a date range
+async function _fetchCompletedOrders(start, end) {
+    const { collection, query, where, getDocs } = window.firebaseModules;
+    const q = query(collection(window.db, 'orders'), where('status', '==', 'completed'));
+    const snap = await getDocs(q);
+    const out = [];
+    snap.forEach(d => {
+        const o = d.data();
+        if (!o.timestamp) return;
+        const t = o.timestamp.toDate ? o.timestamp.toDate() : new Date(o.timestamp);
+        if (t >= start && t <= end) out.push({ ...o, _date: t });
+    });
+    return out;
+}
+
+// ── 1) DAILY SALES (date-wise) ────────────────────────────────
+async function exportDailySalesExcel() {
+    if (!_xlsxReady()) return;
+    const r = _dashRange();
+    if (!r) return;
+    showToast('Building daily sales report…', 'info');
+    try {
+        const orders = await _fetchCompletedOrders(r.start, r.end);
+        const byDay = {};
+        orders.forEach(o => {
+            const key = _localDateStr(o._date);
+            if (!byDay[key]) byDay[key] = { orders: 0, sales: 0, cash: 0, online: 0, redeemed: 0, items: 0, dinein: 0, delivery: 0 };
+            const b = byDay[key];
+            const amt = (o.finalPaid !== undefined ? o.finalPaid : o.total) || 0;
+            b.orders++;
+            b.sales += amt;
+            b.redeemed += (o.redeemed || 0);
+            if (o.paymentMode === 'Partial') { b.cash += (o.cashAmount || 0); b.online += (o.onlineAmount || 0); }
+            else if (o.paymentMode === 'Online') { b.online += amt; }
+            else { b.cash += amt; }
+            (o.items || []).forEach(i => b.items += (i.qty || 0));
+            if (o.orderType === 'delivery') b.delivery++; else b.dinein++;
+        });
+
+        const days = Object.keys(byDay).sort();
+        if (!days.length) return showToast('No completed orders in this range', 'error');
+
+        const rows = [
+            ['JUICE THERAPY — DAILY SALES REPORT'],
+            [`Range: ${r.s} to ${r.e}`, '', `Generated: ${new Date().toLocaleString('en-IN')}`],
+            [],
+            ['Date', 'Orders', 'Items Sold', 'Dine-in', 'Delivery', 'Cash (₹)', 'Online (₹)', 'Points Redeemed (₹)', 'Total Sales (₹)']
+        ];
+        const tot = { orders: 0, items: 0, dinein: 0, delivery: 0, cash: 0, online: 0, redeemed: 0, sales: 0 };
+        days.forEach(d => {
+            const b = byDay[d];
+            rows.push([d, b.orders, b.items, b.dinein, b.delivery, b.cash, b.online, b.redeemed, b.sales]);
+            Object.keys(tot).forEach(k => tot[k] += b[k]);
+        });
+        rows.push([]);
+        rows.push(['TOTAL', tot.orders, tot.items, tot.dinein, tot.delivery, tot.cash, tot.online, tot.redeemed, tot.sales]);
+        rows.push(['Average / day', Math.round(tot.orders / days.length), '', '', '', '', '', '', Math.round(tot.sales / days.length)]);
+
+        _saveWorkbook([{ name: 'Daily Sales', rows, widths: [12, 8, 11, 9, 9, 12, 12, 18, 15] }],
+            `Daily_Sales_${r.s}_to_${r.e}.xlsx`);
+        showToast(`Exported ${days.length} days ✅`);
+    } catch (e) {
+        console.error(e);
+        showToast('Export failed: ' + e.message, 'error');
+    }
+}
+
+// ── 2) ITEM-WISE SALES (quantity, highest first) ──────────────
+async function exportItemSalesExcel() {
+    if (!_xlsxReady()) return;
+    const r = _dashRange();
+    if (!r) return;
+    showToast('Building item-wise report…', 'info');
+    try {
+        const orders = await _fetchCompletedOrders(r.start, r.end);
+        const map = {};
+        orders.forEach(o => {
+            (o.items || []).forEach(i => {
+                const name = i.name || 'Unknown';
+                if (!map[name]) map[name] = { qty: 0, revenue: 0, orders: 0, parcel: 0 };
+                map[name].qty += (i.qty || 0);
+                map[name].revenue += ((i.price || 0) * (i.qty || 0));
+                map[name].orders++;
+                map[name].parcel += (o.orderType === 'delivery' ? (i.qty || 0) : (i.parcelQty || 0));
+            });
+        });
+
+        const list = Object.entries(map)
+            .map(([name, v]) => ({ name, ...v }))
+            .sort((a, b) => b.qty - a.qty);          // descending by quantity
+        if (!list.length) return showToast('No items sold in this range', 'error');
+
+        const totQty = list.reduce((s, i) => s + i.qty, 0);
+        const totRev = list.reduce((s, i) => s + i.revenue, 0);
+
+        const rows = [
+            ['JUICE THERAPY — ITEM-WISE SALES REPORT'],
+            [`Range: ${r.s} to ${r.e}`, '', `Generated: ${new Date().toLocaleString('en-IN')}`],
+            [],
+            ['Rank', 'Item Name', 'Qty Sold', 'Times Ordered', 'Parcel / Delivery Qty', 'Revenue (₹)', 'Share of Qty (%)']
+        ];
+        list.forEach((i, idx) => {
+            rows.push([idx + 1, i.name, i.qty, i.orders, i.parcel, i.revenue,
+                totQty ? Math.round((i.qty / totQty) * 1000) / 10 : 0]);
+        });
+        rows.push([]);
+        rows.push(['', 'TOTAL', totQty, '', '', totRev, 100]);
+
+        _saveWorkbook([{ name: 'Item Sales', rows, widths: [6, 30, 10, 14, 20, 13, 16] }],
+            `Item_Sales_${r.s}_to_${r.e}.xlsx`);
+        showToast(`Exported ${list.length} items ✅`);
+    } catch (e) {
+        console.error(e);
+        showToast('Export failed: ' + e.message, 'error');
+    }
+}
+
+// ── 3) CASH HISTORY (day-by-day, past days included) ──────────
+let CASH_HISTORY_CACHE = null;
+
+async function _buildCashHistory(from, to) {
+    const { collection, query, where, getDocs } = window.firebaseModules;
+    const start = new Date(from + 'T00:00:00');
+    const end = new Date(to + 'T23:59:59.999');
+
+    // Cash entries + reconciliation checks for the range (date is a 'YYYY-MM-DD' string)
+    const [entriesSnap, checksSnap] = await Promise.all([
+        getDocs(query(collection(window.db, 'cashEntries'), where('date', '>=', from), where('date', '<=', to))),
+        getDocs(query(collection(window.db, 'cashChecks'), where('date', '>=', from), where('date', '<=', to)))
+    ]);
+
+    const days = {};
+    const day = (d) => (days[d] = days[d] || { date: d, opening: 0, cashSales: 0, cashIn: 0, expense: 0, counted: null, diff: null, expenseNotes: [] });
+
+    entriesSnap.forEach(doc => {
+        const e = doc.data();
+        if (!e.date) return;
+        const b = day(e.date);
+        if (e.type === 'opening') b.opening = e.amount || 0;
+        else if (e.type === 'in') b.cashIn += (e.amount || 0);
+        else if (e.type === 'out') {
+            b.expense += (e.amount || 0);
+            b.expenseNotes.push(`${e.category || 'Expense'}${e.note ? ': ' + e.note : ''} (₹${e.amount || 0})`);
+        }
+    });
+
+    checksSnap.forEach(doc => {
+        const c = doc.data();
+        if (!c.date) return;
+        const b = day(c.date);
+        b.counted = c.counted;         // latest check for that day wins
+        b.diff = c.diff;
+    });
+
+    // Cash sales per day — one orders query for the whole range
+    const ordersSnap = await getDocs(query(collection(window.db, 'orders'),
+        where('timestamp', '>=', start), where('timestamp', '<=', end)));
+    ordersSnap.forEach(doc => {
+        const o = doc.data();
+        if (o.status !== 'completed' || !o.timestamp) return;
+        const t = o.timestamp.toDate ? o.timestamp.toDate() : new Date(o.timestamp);
+        const key = _localDateStr(t);
+        const b = day(key);
+        if (typeof o.cashAmount === 'number') b.cashSales += o.cashAmount;
+        else if ((o.paymentMode || 'Cash') === 'Cash') b.cashSales += (o.finalPaid || o.total || 0);
+    });
+
+    const list = Object.values(days).sort((a, b) => b.date.localeCompare(a.date)); // newest first
+    list.forEach(b => { b.expected = b.opening + b.cashSales + b.cashIn - b.expense; });
+    return list;
+}
+
+async function loadCashHistory() {
+    const from = document.getElementById('cashHistFrom').value;
+    const to = document.getElementById('cashHistTo').value;
+    const box = document.getElementById('cashHistoryResult');
+    if (!from || !to) { showToast('Select both dates', 'error'); return; }
+    if (from > to) { showToast('From date must be before To date', 'error'); return; }
+    box.innerHTML = '<p class="text-muted text-center" style="font-size:0.85rem;">Loading…</p>';
+    try {
+        const list = await _buildCashHistory(from, to);
+        CASH_HISTORY_CACHE = { from, to, list };
+        if (!list.length) {
+            box.innerHTML = '<p class="text-muted text-center" style="font-size:0.85rem;">No cash records in this range.</p>';
+            return;
+        }
+        const t = list.reduce((a, b) => ({
+            cashSales: a.cashSales + b.cashSales, cashIn: a.cashIn + b.cashIn,
+            expense: a.expense + b.expense, expected: a.expected + b.expected
+        }), { cashSales: 0, cashIn: 0, expense: 0, expected: 0 });
+
+        box.innerHTML = `
+            <div class="flex gap-2" style="flex-wrap:wrap; margin-bottom:12px;">
+                <div class="stat-card" style="flex:1; min-width:120px;"><div class="stat-label">Cash Sales</div><div class="stat-value" style="font-size:1.1rem;">₹${t.cashSales}</div></div>
+                <div class="stat-card" style="flex:1; min-width:120px;"><div class="stat-label">Cash In</div><div class="stat-value" style="font-size:1.1rem;">₹${t.cashIn}</div></div>
+                <div class="stat-card" style="flex:1; min-width:120px; border-color:var(--warning);"><div class="stat-label">Expenses</div><div class="stat-value" style="font-size:1.1rem;">₹${t.expense}</div></div>
+                <div class="stat-card" style="flex:1; min-width:120px; border-color:var(--success);"><div class="stat-label">Days</div><div class="stat-value" style="font-size:1.1rem;">${list.length}</div></div>
+            </div>
+            <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:0.82rem; min-width:640px;">
+                <thead><tr style="text-align:left; color:var(--text-muted); border-bottom:1px solid rgba(0,212,255,0.25);">
+                    <th style="padding:7px 6px;">Date</th><th>Opening</th><th>Cash Sales</th><th>Cash In</th>
+                    <th>Expenses</th><th>Expected</th><th>Counted</th><th>Difference</th>
+                </tr></thead>
+                <tbody>
+                ${list.map(b => {
+                    const has = b.counted !== null && b.counted !== undefined;
+                    const dc = !has ? 'var(--text-muted)' : (b.diff === 0 ? 'var(--success)' : (b.diff < 0 ? '#FF4D6D' : '#FF9500'));
+                    const dl = !has ? '—' : (b.diff === 0 ? 'MATCH' : (b.diff < 0 ? `SHORT ₹${Math.abs(b.diff)}` : `EXCESS ₹${b.diff}`));
+                    return `<tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                        <td style="padding:7px 6px; font-weight:600;">${b.date}</td>
+                        <td>₹${b.opening}</td><td>₹${b.cashSales}</td><td>₹${b.cashIn}</td>
+                        <td style="color:var(--warning);">₹${b.expense}</td>
+                        <td><strong>₹${b.expected}</strong></td>
+                        <td>${has ? '₹' + b.counted : '—'}</td>
+                        <td style="color:${dc}; font-weight:700;">${dl}</td>
+                    </tr>`;
+                }).join('')}
+                </tbody>
+            </table></div>`;
+        showToast(`Loaded ${list.length} days`);
+    } catch (e) {
+        console.error(e);
+        box.innerHTML = `<p class="text-danger text-center">Error: ${e.message}</p>`;
+    }
+}
+
+async function exportCashHistoryExcel() {
+    if (!_xlsxReady()) return;
+    const from = document.getElementById('cashHistFrom').value;
+    const to = document.getElementById('cashHistTo').value;
+    if (!from || !to) { showToast('Select both dates', 'error'); return; }
+    try {
+        let data = CASH_HISTORY_CACHE;
+        if (!data || data.from !== from || data.to !== to) {
+            showToast('Building cash report…', 'info');
+            data = { from, to, list: await _buildCashHistory(from, to) };
+            CASH_HISTORY_CACHE = data;
+        }
+        const list = data.list;
+        if (!list.length) return showToast('No cash records in this range', 'error');
+
+        const rows = [
+            ['JUICE THERAPY — CASH BOX HISTORY'],
+            [`Range: ${from} to ${to}`, '', `Generated: ${new Date().toLocaleString('en-IN')}`],
+            [],
+            ['Date', 'Opening (₹)', 'Cash Sales (₹)', 'Cash In (₹)', 'Expenses (₹)', 'Expected (₹)', 'Counted (₹)', 'Difference (₹)', 'Status', 'Expense Details']
+        ];
+        const t = { opening: 0, cashSales: 0, cashIn: 0, expense: 0, expected: 0 };
+        [...list].sort((a, b) => a.date.localeCompare(b.date)).forEach(b => {
+            const has = b.counted !== null && b.counted !== undefined;
+            rows.push([b.date, b.opening, b.cashSales, b.cashIn, b.expense, b.expected,
+                has ? b.counted : '', has ? b.diff : '',
+                !has ? 'Not counted' : (b.diff === 0 ? 'MATCH' : (b.diff < 0 ? 'SHORT' : 'EXCESS')),
+                b.expenseNotes.join(' | ')]);
+            t.opening += b.opening; t.cashSales += b.cashSales; t.cashIn += b.cashIn;
+            t.expense += b.expense; t.expected += b.expected;
+        });
+        rows.push([]);
+        rows.push(['TOTAL', t.opening, t.cashSales, t.cashIn, t.expense, t.expected, '', '', '', '']);
+
+        _saveWorkbook([{ name: 'Cash History', rows, widths: [12, 12, 14, 12, 13, 13, 12, 14, 12, 45] }],
+            `Cash_History_${from}_to_${to}.xlsx`);
+        showToast(`Exported ${list.length} days ✅`);
+    } catch (e) {
+        console.error(e);
+        showToast('Export failed: ' + e.message, 'error');
+    }
+}
+
         window.onload = () => {
            
             const checkFirebase = setInterval(() => {
@@ -2058,12 +2392,26 @@ async function restoreCustomerSession(phone) {
         async function saveCustomerName() {
             const name = document.getElementById('newCustName').value;
             if(!name) return showToast('Name is required', 'error');
-            const { doc, setDoc, serverTimestamp } = window.firebaseModules;
-            await setDoc(doc(window.db, 'customers', STATE.tempPhone), {
-                phone: STATE.tempPhone, name: name, points: 0, joined: serverTimestamp()
-            }, { merge: true });
+            const { doc, getDoc, setDoc, serverTimestamp } = window.firebaseModules;
+            const custRef = doc(window.db, 'customers', STATE.tempPhone);
+
+            // IMPORTANT: a customer doc may already exist (created by the POS when staff
+            // billed them) and already hold earned points / pointLots. Only write the
+            // name here — never `points`, or the customer's balance would be wiped on
+            // their first app login. `joined` is set only when the doc is truly new.
+            let existing = {};
+            try {
+                const snap = await getDoc(custRef);
+                if (snap.exists()) existing = snap.data() || {};
+            } catch (e) { console.error('name save: read failed', e); }
+
+            const payload = { phone: STATE.tempPhone, name: name };
+            if (!existing.joined) payload.joined = serverTimestamp();
+            await setDoc(custRef, payload, { merge: true });
+
             document.getElementById('customerNameModal').classList.add('hidden');
-            finalizeCustomerLogin(STATE.tempPhone, { name, points: 0 });
+            // Pass the REAL customer data (with its points/pointLots) so the balance shows correctly
+            finalizeCustomerLogin(STATE.tempPhone, { ...existing, name });
         }
 
         function finalizeCustomerLogin(phone, data) {
@@ -2149,6 +2497,15 @@ async function restoreCustomerSession(phone) {
         const cd = document.getElementById('cashReportDate');
         if(!cd.value) cd.valueAsDate = new Date();
         loadCashReport();
+        // Default the history range to the last 7 days
+        const hf = document.getElementById('cashHistFrom');
+        const ht = document.getElementById('cashHistTo');
+        if (hf && ht && !hf.value) {
+            const t = new Date();
+            const w = new Date(); w.setDate(w.getDate() - 6);
+            hf.value = _localDateStr(w);
+            ht.value = _localDateStr(t);
+        }
     }
 }
 
