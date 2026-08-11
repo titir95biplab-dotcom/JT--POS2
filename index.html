@@ -872,6 +872,62 @@ async function trackUserActivity(phone) {
         <input type="time" id="storeCloseTime" class="input">
     </div>
 
+    <div style="border:1px solid var(--border, rgba(255,255,255,0.12)); border-radius:10px; padding:12px; margin-top:4px;">
+        <div style="font-weight:700; font-size:0.9rem; margin-bottom:4px;">📍 Outlet Location Gate</div>
+        <p class="text-muted" style="font-size:0.78rem; margin-bottom:10px;">
+            The Outlet POS only opens when staff are within this radius of the shop. Admin is
+            never checked. Stand at the counter and tap <b>Use my current location</b> — that
+            is far more reliable than typing coordinates from a map.
+        </p>
+        <div class="flex gap-2" style="flex-wrap:wrap;">
+            <div style="flex:1; min-width:120px;">
+                <label class="text-muted" style="font-size:0.75rem;">Latitude</label>
+                <input type="number" step="any" id="storeOutletLat" class="input" placeholder="e.g. 22.66258" style="margin:0;">
+            </div>
+            <div style="flex:1; min-width:120px;">
+                <label class="text-muted" style="font-size:0.75rem;">Longitude</label>
+                <input type="number" step="any" id="storeOutletLng" class="input" placeholder="e.g. 88.43201" style="margin:0;">
+            </div>
+            <div style="flex:1; min-width:90px; max-width:120px;">
+                <label class="text-muted" style="font-size:0.75rem;">Radius (m)</label>
+                <input type="number" id="storeGeofenceM" class="input" placeholder="150" style="margin:0;">
+            </div>
+        </div>
+        <div class="flex gap-2" style="margin-top:10px; flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-sm" onclick="captureOutletLocation()" style="flex:1; min-width:180px;">📍 Use my current location</button>
+            <button class="btn btn-secondary btn-sm" onclick="testOutletDistance()" style="flex:1; min-width:150px;">📏 Test my distance</button>
+        </div>
+        <div id="geofenceTestResult" class="text-muted" style="font-size:0.78rem; margin-top:8px; line-height:1.5;"></div>
+        <p class="text-muted" style="font-size:0.72rem; margin-top:8px;">
+            Leave the radius at 150 m unless staff get blocked while genuinely at the shop —
+            indoors a phone can read 50–100 m off, so raise it before you suspect anything else.
+            Remember to tap Save Settings.
+        </p>
+    </div>
+
+    <div style="border:1px solid var(--border, rgba(255,255,255,0.12)); border-radius:10px; padding:12px; margin-top:4px;">
+        <div style="font-weight:700; font-size:0.9rem; margin-bottom:4px;">🚚 Delivery Charge</div>
+        <p class="text-muted" style="font-size:0.78rem; margin-bottom:10px;">
+            A delivery order below the minimum order value is charged automatically. It shows
+            in the cart before the order is placed, on the bill, and in every report.
+        </p>
+        <div class="flex gap-2" style="flex-wrap:wrap;">
+            <div style="flex:1; min-width:130px;">
+                <label class="text-muted" style="font-size:0.75rem;">Delivery charge (₹)</label>
+                <input type="number" id="storeDeliveryCharge" class="input" placeholder="e.g. 30" style="margin:0;" min="0">
+            </div>
+            <div style="flex:1; min-width:130px;">
+                <label class="text-muted" style="font-size:0.75rem;">Minimum order value (₹)</label>
+                <input type="number" id="storeMinOrderValue" class="input" placeholder="e.g. 300" style="margin:0;" min="0">
+            </div>
+        </div>
+        <p class="text-muted" style="font-size:0.72rem; margin-top:8px; line-height:1.5;">
+            Order ≥ minimum → delivery free. Below it → the charge is added.<br>
+            Leave the charge blank or 0 to switch the feature off. Set the minimum to 0 to
+            charge every delivery order regardless of size. Dine-in is never charged.
+        </p>
+    </div>
+
     <div style="background:rgba(15,39,68,0.90); padding:10px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
         <span>Outlet Status:</span>
         <label class="flex items-center gap-2" style="cursor:pointer;">
@@ -1370,6 +1426,7 @@ async function trackUserActivity(phone) {
         };
 let TEMP_EDIT_ITEMS = [];
 let TEMP_EDIT_DISCOUNT = null; // Store discount info during editing
+let TEMP_EDIT_ORDERTYPE = 'dine-in'; // order type of the order open in the edit modal
 let SALES_CHART_INSTANCE = null;
 let isSubmitting = false; // Guard against duplicate order submissions
 
@@ -2917,11 +2974,69 @@ onMessage(messaging, (payload) => {
                 navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
             });
         }
+        function _numOrNull(id) {
+            const el = document.getElementById(id);
+            if (!el || String(el.value).trim() === '') return null;
+            const n = Number(el.value);
+            return isNaN(n) ? null : n;
+        }
+
+        // Where the shop is. Admin → Settings wins, so the coordinates can be corrected
+        // from the shop itself without a redeploy; the constants above are only the
+        // fallback for a store document that has never had them set.
+        function outletGeofence() {
+            const s = STATE.storeSettings || {};
+            const num = (v, fb) => (typeof v === 'number' && !isNaN(v)) ? v : fb;
+            return {
+                lat: num(s.outletLat, OUTLET_SHOP_LAT),
+                lng: num(s.outletLng, OUTLET_SHOP_LNG),
+                radius: Math.max(30, num(s.geofenceM, OUTLET_GEOFENCE_M))
+            };
+        }
+
+        // Admin: capture the shop's coordinates by standing at the counter.
+        async function captureOutletLocation() {
+            const box = document.getElementById('geofenceTestResult');
+            box.innerHTML = '📍 Reading your location…';
+            try {
+                const pos = await _getPos();
+                document.getElementById('storeOutletLat').value = pos.coords.latitude;
+                document.getElementById('storeOutletLng').value = pos.coords.longitude;
+                if (!document.getElementById('storeGeofenceM').value) document.getElementById('storeGeofenceM').value = 150;
+                box.innerHTML = `✅ Captured <b>${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}</b> (GPS accuracy ±${Math.round(pos.coords.accuracy)} m).<br>Now tap <b>Save Settings</b>.`;
+            } catch (e) {
+                box.innerHTML = '⚠️ Could not read your location. Allow location access for this site and try again.'
+                    + (window.isSecureContext ? '' : '<br>The app must be opened over https, not from a downloaded file.');
+            }
+        }
+
+        // Admin: how far am I from the saved shop location right now?
+        async function testOutletDistance() {
+            const box = document.getElementById('geofenceTestResult');
+            box.innerHTML = '📏 Measuring…';
+            const lat = _numOrNull('storeOutletLat'), lng = _numOrNull('storeOutletLng');
+            const g = (lat !== null && lng !== null)
+                ? { lat, lng, radius: _numOrNull('storeGeofenceM') || OUTLET_GEOFENCE_M }
+                : outletGeofence();
+            try {
+                const pos = await _getPos();
+                const d = _distMeters(pos.coords.latitude, pos.coords.longitude, g.lat, g.lng);
+                const ok = d <= g.radius;
+                box.innerHTML = `You are <b>${Math.round(d)} m</b> from the saved location (radius ${g.radius} m, GPS accuracy ±${Math.round(pos.coords.accuracy)} m).<br>`
+                    + (ok ? '<span style="color:var(--success);">✅ Staff would be let in from here.</span>'
+                          : '<span style="color:var(--danger);">⛔ Staff would be blocked from here.</span> Either capture the location again from the counter, or raise the radius.');
+            } catch (e) {
+                box.innerHTML = '⚠️ Could not read your location. Allow location access and try again.';
+            }
+        }
+
         async function outletLocationCheck() {
             try {
                 const pos = await _getPos();
-                const d = _distMeters(pos.coords.latitude, pos.coords.longitude, OUTLET_SHOP_LAT, OUTLET_SHOP_LNG);
-                return { ok: d <= OUTLET_GEOFENCE_M, dist: d };
+                const g = outletGeofence();
+                const d = _distMeters(pos.coords.latitude, pos.coords.longitude, g.lat, g.lng);
+                return { ok: d <= g.radius, dist: d, radius: g.radius, accuracy: pos.coords.accuracy,
+                         myLat: pos.coords.latitude, myLng: pos.coords.longitude };
             } catch (e) { return { ok: false, dist: null, err: e }; }
         }
         function showOutletLock(html, showRetry) {
@@ -2959,6 +3074,19 @@ onMessage(messaging, (payload) => {
             hideOutletLock();
             try { window.firebaseModules.signOut(window.auth); } catch (e) {}
         }
+        // Coordinates of whoever is currently looking at the lock screen, so they can
+        // be read out or copied to the admin.
+        let _lastKnownPos = null;
+        function copyMyLocation() {
+            if (!_lastKnownPos) return;
+            const txt = `${_lastKnownPos.lat.toFixed(6)}, ${_lastKnownPos.lng.toFixed(6)}`;
+            const done = () => showToast('Location copied — send it to the admin', 'success');
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(txt).then(done).catch(() => prompt('Copy these coordinates:', txt));
+            } else {
+                prompt('Copy these coordinates:', txt);
+            }
+        }
         // Gate the outlet panel behind being at the shop, then run its loaders.
         async function gateOutletPanel(loadFn) {
             if (loadFn) _pendingOutletLoad = loadFn;
@@ -2970,10 +3098,21 @@ onMessage(messaging, (payload) => {
                 if (_pendingOutletLoad) _pendingOutletLoad();
             } else {
                 let msg;
+                if (r.myLat != null) _lastKnownPos = { lat: r.myLat, lng: r.myLng };
+                const whereAmI = (r.myLat == null) ? '' : `
+                    <div style="margin-top:16px;padding:10px 12px;border:1px dashed var(--primary);border-radius:8px;text-align:left;">
+                        <div style="font-size:0.72rem;opacity:0.7;margin-bottom:4px;">📍 Your position right now</div>
+                        <div style="font-family:monospace;font-size:0.9rem;font-weight:700;">${r.myLat.toFixed(6)}, ${r.myLng.toFixed(6)}</div>
+                        <div style="font-size:0.72rem;opacity:0.7;margin-top:6px;line-height:1.45;">
+                            If you ARE at the shop, send these two numbers to the admin — they go in
+                            Admin &rarr; Settings &rarr; Outlet Location Gate, and the POS opens for everyone here.
+                        </div>
+                        <button onclick="copyMyLocation()" style="margin-top:8px;background:transparent;border:1px solid var(--primary);color:var(--primary);padding:6px 12px;border-radius:6px;font-size:0.78rem;cursor:pointer;">📋 Copy coordinates</button>
+                    </div>`;
                 if (r.dist != null) {
-                    msg = `⛔ You are <b>${Math.round(r.dist)} m</b> from the shop.<br>The Outlet POS opens only at the shop.`;
+                    msg = `⛔ You are <b>${Math.round(r.dist)} m</b> from the shop.<br>The Outlet POS opens within ${r.radius} m.${r.accuracy ? `<br><small>GPS accuracy here is ±${Math.round(r.accuracy)} m.</small>` : ``}` + whereAmI;
                 } else {
-                    msg = '⚠️ Could not get your location. Allow location access and retry.';
+                    msg = '⚠️ Could not get your location. Allow location access and retry.' + whereAmI;
                     if (!window.isSecureContext) msg += '<br><small>⚠️ Open the app over https (not a downloaded file).</small>';
                 }
                 showOutletLock(msg, true);
@@ -3251,6 +3390,11 @@ document.getElementById('storeUpi').value = s.upi || '';
                 document.getElementById('storeCloseTime').value = s.closeTime || '';
                 document.getElementById('storeFooter').value = s.footer || '';
                 document.getElementById('storeLink').value = s.link || '';
+                document.getElementById('storeOutletLat').value = (typeof s.outletLat === 'number') ? s.outletLat : '';
+                document.getElementById('storeOutletLng').value = (typeof s.outletLng === 'number') ? s.outletLng : '';
+                document.getElementById('storeGeofenceM').value = (typeof s.geofenceM === 'number') ? s.geofenceM : '';
+                document.getElementById('storeDeliveryCharge').value = (typeof s.deliveryCharge === 'number') ? s.deliveryCharge : '';
+                document.getElementById('storeMinOrderValue').value = (typeof s.minOrderValue === 'number') ? s.minOrderValue : '';
                 if(document.getElementById('storeQrUrl')) document.getElementById('storeQrUrl').value = s.qrUrl || '';
                 
                 // Toggle Switch Logic
@@ -3309,7 +3453,13 @@ document.getElementById('storeUpi').value = s.upi || '';
         isOpen: isOpen,
         footer: document.getElementById('storeFooter').value,
         link: document.getElementById('storeLink').value,
-        qrUrl: document.getElementById('storeQrUrl').value
+        qrUrl: document.getElementById('storeQrUrl').value,
+        // Blank fields are stored as null so outletGeofence() falls back to the constants
+        outletLat: _numOrNull('storeOutletLat'),
+        outletLng: _numOrNull('storeOutletLng'),
+        geofenceM: _numOrNull('storeGeofenceM'),
+        deliveryCharge: _numOrNull('storeDeliveryCharge'),
+        minOrderValue: _numOrNull('storeMinOrderValue')
     };
     
     try {
@@ -4077,6 +4227,7 @@ TEMP_EDIT_ITEMS = JSON.parse(JSON.stringify(data.items)); // Deep copy to avoid 
 
 // Store discount info for editing
 TEMP_EDIT_DISCOUNT = data.discount ? JSON.parse(JSON.stringify(data.discount)) : null;
+TEMP_EDIT_ORDERTYPE = data.orderType || 'dine-in';
 
 // 2. Populate the "Add Item" dropdown
 const itemSelect = document.getElementById('adminAddItemSelect');
@@ -4106,6 +4257,13 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             
             // Add discount info if present
             let discountHtml = '';
+            if(Number(data.deliveryCharge) > 0) {
+                discountHtml += `
+                    <div class="flex justify-between" style="font-size:0.85rem; margin-top:8px; padding:8px; border-radius:6px; background:rgba(255,149,0,0.10); border:1px solid rgba(255,149,0,0.30);">
+                        <span style="color:#FF9500; font-weight:600;">🚚 Delivery Charge</span>
+                        <span style="color:#FF9500; font-weight:700;">+₹${data.deliveryCharge}</span>
+                    </div>`;
+            }
             if(data.discount && data.discount.amount > 0) {
                 const discountText = data.discount.type === 'percentage' 
                     ? `${data.discount.value}% OFF` 
@@ -4366,7 +4524,8 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
                 finalPaid: newTotal,
                 total: newTotal,
                 subtotal: subtotal,
-                discount: TEMP_EDIT_DISCOUNT, 
+                discount: TEMP_EDIT_DISCOUNT,
+                deliveryCharge: deliveryChargeFor(subtotal, TEMP_EDIT_ORDERTYPE),
                 paymentMode: newMode,
                 items: newItems,
                 bonusEarned: newBonus,
@@ -4517,7 +4676,11 @@ function recalcEditTotal() {
         }
         finalTotal = subtotal - TEMP_EDIT_DISCOUNT.amount;
     }
-    
+
+    // Editing items can push the order over or under the free-delivery threshold,
+    // so the charge is re-decided here rather than carried over.
+    finalTotal += deliveryChargeFor(subtotal, TEMP_EDIT_ORDERTYPE);
+
     document.getElementById('editTotal').value = finalTotal;
 }
 
@@ -4818,6 +4981,35 @@ function filterMenu(text) {
             }
         }
 
+        // ── DELIVERY CHARGE ───────────────────────────────────────────────
+        // A delivery order under the minimum order value picks up a delivery
+        // charge. Both figures live in Admin → Settings (Firestore settings/store).
+        //
+        //     minOrderValue = 0  → every delivery order is charged
+        //     deliveryCharge = 0 → the feature is off
+        //
+        // Returns { charge, minValue, free, shortBy } so the carts can also show
+        // "add ₹x more for free delivery".
+        function deliveryInfoFor(itemsSubtotal, orderType) {
+            const s = STATE.storeSettings || {};
+            const charge   = Math.max(0, Number(s.deliveryCharge) || 0);
+            const minValue = Math.max(0, Number(s.minOrderValue) || 0);
+            const sub = Number(itemsSubtotal) || 0;
+            if (orderType !== 'delivery' || charge <= 0) {
+                return { charge: 0, minValue, free: false, shortBy: 0, configured: charge > 0 };
+            }
+            const free = (minValue > 0 && sub >= minValue);
+            return {
+                charge: free ? 0 : charge,
+                minValue,
+                free,
+                shortBy: (minValue > 0 && !free) ? (minValue - sub) : 0,
+                configured: true
+            };
+        }
+        function deliveryChargeFor(itemsSubtotal, orderType) {
+            return deliveryInfoFor(itemsSubtotal, orderType).charge;
+        }
         function renderCartGeneric(container, totalEl, cartArray) {
             if(cartArray.length === 0) {
                 container.innerHTML = '<div class="text-center text-muted" style="margin-top:20px;">Cart is empty</div>';
@@ -4880,6 +5072,7 @@ function filterMenu(text) {
             
             // Apply discount if available (only for outlet cart, not customer cart)
             let finalTotal = total;
+            let strikeLine = '';
             if(appliedDiscount && container.id === 'cartItemsList') {
                 // Recalculate discount amount based on current cart total
                 let discountAmount = 0;
@@ -4896,10 +5089,25 @@ function filterMenu(text) {
                 appliedDiscount.amount = discountAmount;
                 
                 finalTotal = total - discountAmount;
-                totalEl.innerHTML = `
-                    <div style="text-decoration:line-through; font-size:0.9rem; color:var(--text-muted);">₹${total}</div>
-                    <div style="color:var(--success);">₹${finalTotal}</div>
-                `;
+                strikeLine = `<div style="text-decoration:line-through; font-size:0.9rem; color:var(--text-muted);">₹${total}</div>`;
+            }
+
+            // Delivery charge, on the cart the customer/staff is looking at right now
+            const cartOrderType = (STATE.role === 'customer') ? STATE.custOrderType : STATE.orderType;
+            const del = deliveryInfoFor(total, cartOrderType);
+            let deliveryLine = '';
+            if (del.charge > 0) {
+                finalTotal += del.charge;
+                deliveryLine = `<div style="font-size:0.75rem; color:var(--warning); font-weight:600;">+ ₹${del.charge} delivery charge</div>`;
+                if (del.shortBy > 0) {
+                    deliveryLine += `<div style="font-size:0.7rem; color:var(--text-muted);">Add ₹${del.shortBy} more for free delivery</div>`;
+                }
+            } else if (del.free) {
+                deliveryLine = `<div style="font-size:0.72rem; color:var(--success); font-weight:600;">✓ Free delivery</div>`;
+            }
+
+            if (strikeLine || deliveryLine) {
+                totalEl.innerHTML = strikeLine + deliveryLine + `<div style="color:var(--success);">₹${finalTotal}</div>`;
             } else {
                 totalEl.innerText = '₹' + total;
             }
@@ -4932,7 +5140,8 @@ function filterMenu(text) {
             isSubmitting = true;
             const orderType = STATE.custOrderType || 'dine-in';
             const itemsForMsg = JSON.parse(JSON.stringify(STATE.custCart));
-            const totalForMsg = itemsForMsg.reduce((s, i) => s + (i.price * i.qty), 0);
+            const itemsSubForMsg = itemsForMsg.reduce((s, i) => s + (i.price * i.qty), 0);
+            const totalForMsg = itemsSubForMsg + deliveryChargeFor(itemsSubForMsg, orderType);
             const custName = (STATE.user && STATE.user.name) || document.getElementById('custNameDisplay')?.innerText || '';
             try {
                 await submitOrder(STATE.user.phone, STATE.custCart, 'requested', 'customer', orderType);
@@ -5015,10 +5224,13 @@ function filterMenu(text) {
                     oldItems = data.items || [];
                     oldModel = data.stockModel || 'reserved-v2';
                     wasBlocked = !!data.stockBlocked;
+                    // Order type can change during the edit, so the charge is re-decided.
+                    const custEditDelivery = deliveryChargeFor(total, orderType);
                     t.update(orderRef, {
                         items: itemsSnapshot,
                         subtotal: total,
-                        total: total,
+                        deliveryCharge: custEditDelivery,
+                        total: total + custEditDelivery,
                         orderType: orderType,
                         stockBlocked: true,
                         stockModel: 'reserved-v2'
@@ -5088,6 +5300,11 @@ function filterMenu(text) {
                     amount: appliedDiscount.amount
                 };
             }
+
+            // Delivery charge is decided from the ITEM subtotal, before any discount,
+            // so a coupon cannot push an order under the free-delivery threshold.
+            const deliveryCharge = deliveryChargeFor(total, orderType);
+            finalTotal += deliveryCharge;
             
             // 2. Save Order — stockBlocked flag tracks whether inventory has been blocked
             let stockBlocked = false;
@@ -5105,6 +5322,7 @@ function filterMenu(text) {
                 customerName: custName,
                 subtotal: total,
                 discount: discountInfo,
+                deliveryCharge: deliveryCharge,
                 total: finalTotal,
                 status: status, 
                 timestamp: serverTimestamp(),
@@ -5828,10 +6046,14 @@ async function deletePendingOrder(orderId) {
                 // --- END INVENTORY FIX ---
 
                 // 3. Update the Order
+                const posEditDelivery = deliveryChargeFor(total, STATE.orderType);
+                finalTotal += posEditDelivery;
+
                 await updateDoc(orderRef, {
-                    items: itemsSnapshot, 
+                    items: itemsSnapshot,
                     subtotal: total,
                     discount: discountInfo,
+                    deliveryCharge: posEditDelivery,
                     total: finalTotal,
                     phone: newPhone,
                     customerName: custName,
@@ -6582,14 +6804,21 @@ async function printBillDirect(orderId) {
         // TOTALS
         addCmd(0x1B, 0x61, 2); // Right Align
         
-        // Show subtotal if discount applied
-        if(order.discount && order.discount.amount > 0) {
+        // Show the breakdown whenever anything sits between subtotal and total
+        const billDiscount = (order.discount && order.discount.amount > 0) ? order.discount.amount : 0;
+        const billDelivery = Number(order.deliveryCharge) || 0;
+        if(billDiscount > 0 || billDelivery > 0) {
             addText(`Subtotal:  ${order.subtotal}\n`);
-            
-            const discountLabel = order.discount.type === 'percentage' 
-                ? `Discount (${order.discount.code} ${order.discount.value}%): `
-                : `Discount (${order.discount.code}): `;
-            addText(`${discountLabel} -${order.discount.amount}\n`);
+
+            if(billDiscount > 0) {
+                const discountLabel = order.discount.type === 'percentage'
+                    ? `Discount (${order.discount.code} ${order.discount.value}%): `
+                    : `Discount (${order.discount.code}): `;
+                addText(`${discountLabel} -${order.discount.amount}\n`);
+            }
+            if(billDelivery > 0) {
+                addText(`Delivery Charge:  +${billDelivery}\n`);
+            }
             addText(`--------------------------------\n`);
         }
         
