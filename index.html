@@ -145,6 +145,8 @@ async function trackUserActivity(phone) {
             border-radius: 8px; color: white; font-size: 1rem; margin-bottom: 10px;
         }
         .input:focus { outline: none; border-color: var(--primary); }
+        /* Daily Audit — compact right-aligned inputs for the verified column */
+        .aud-in { margin:0 !important; padding:6px 8px; text-align:right; max-width:120px; font-size:0.88rem; }
 
         .card { background: var(--surface); border-radius: var(--radius); padding: var(--spacing); margin-bottom: var(--spacing); }
 
@@ -390,6 +392,7 @@ async function trackUserActivity(phone) {
 <button class="btn btn-secondary tab-btn" onclick="switchAdminTab('notify')" id="btn-adm-notify">📢 Notify</button>
 <button class="btn btn-secondary tab-btn" onclick="switchAdminTab('inventory')" id="btn-adm-inventory">🏪 Inventory</button>
 <button class="btn btn-secondary tab-btn" onclick="switchAdminTab('cash')" id="btn-adm-cash">💰 Cash</button>
+<button class="btn btn-secondary tab-btn" onclick="switchAdminTab('audit')" id="btn-adm-audit">🧾 Audit</button>
             </div>
 
 <div id="adm-view-notify" class="hidden">
@@ -470,6 +473,142 @@ async function trackUserActivity(phone) {
     </div>
 </div>
 <!-- ADMIN INVENTORY VIEW — Dynamic Recipe System -->
+<!-- ADMIN DAILY AUDIT VIEW — one place to reconcile a day's cash -->
+<div id="adm-view-audit" class="hidden">
+
+    <!-- ── THE RECONCILIATION ── -->
+    <div class="card">
+        <div class="flex justify-between items-center" style="margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+            <h3 style="margin:0;">🧾 Daily Audit</h3>
+            <div class="flex gap-2 items-center" style="flex-wrap:wrap;">
+                <input type="date" id="auditDate" class="input" style="margin:0; padding:6px 8px; font-size:0.85rem;">
+                <button class="btn btn-primary btn-sm" onclick="runDailyAudit()">🔍 Run Audit</button>
+            </div>
+        </div>
+        <p class="text-muted" style="font-size:0.82rem; margin-bottom:14px;">
+            Run this after the outlet closes. Every figure on the left is taken from what the POS
+            already recorded. Check the online total against your bank / UPI account &mdash; if it
+            differs, correct it on the right and the variance updates as you type.
+        </p>
+
+        <div id="auditEmpty" class="text-muted text-center" style="font-size:0.85rem; padding:22px 0;">
+            Pick a date and tap <strong>Run Audit</strong>.
+        </div>
+
+        <div id="auditBody" class="hidden">
+
+            <div id="auditStatusBar" style="border-radius:10px; padding:12px; margin-bottom:14px; text-align:center; font-weight:700;"></div>
+            <div id="auditWarnings" style="margin-bottom:14px;"></div>
+
+            <div style="overflow-x:auto;">
+                <table style="width:100%; border-collapse:collapse; font-size:0.88rem; min-width:420px;">
+                    <thead>
+                        <tr style="border-bottom:2px solid var(--border, rgba(255,255,255,0.12));">
+                            <th style="padding:8px 6px; text-align:left;">Item</th>
+                            <th style="padding:8px 6px; text-align:right; white-space:nowrap;">System <span class="text-muted" style="font-weight:400; font-size:0.75rem;">(POS)</span></th>
+                            <th style="padding:8px 6px; text-align:right; white-space:nowrap;">Verified <span class="text-muted" style="font-weight:400; font-size:0.75rem;">(editable)</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="padding:7px 6px;">Opening balance</td>
+                            <td style="padding:7px 6px; text-align:right;" id="audSysOpening">&#8377;0</td>
+                            <td style="padding:4px 6px; text-align:right;"><input type="number" id="audOpening" class="input aud-in" oninput="recalcAuditTotals()"></td>
+                        </tr>
+                        <tr>
+                            <td style="padding:7px 6px;">Total sales <span class="text-muted" style="font-size:0.75rem;">(completed orders)</span></td>
+                            <td style="padding:7px 6px; text-align:right;" id="audSysTotalSales">&#8377;0</td>
+                            <td style="padding:4px 6px; text-align:right;"><input type="number" id="audTotalSales" class="input aud-in" oninput="recalcAuditTotals()"></td>
+                        </tr>
+                        <tr>
+                            <td style="padding:7px 6px;">&minus; Online payments <span class="text-muted" style="font-size:0.75rem;">(check bank)</span></td>
+                            <td style="padding:7px 6px; text-align:right;" id="audSysOnline">&#8377;0</td>
+                            <td style="padding:4px 6px; text-align:right;"><input type="number" id="audOnline" class="input aud-in" oninput="recalcAuditTotals()"></td>
+                        </tr>
+                        <tr style="background:rgba(128,128,128,0.06);">
+                            <td style="padding:7px 6px;">= Cash sales</td>
+                            <td style="padding:7px 6px; text-align:right;" id="audSysCashSales">&#8377;0</td>
+                            <td style="padding:7px 10px; text-align:right; font-weight:700;" id="audCashSales">&#8377;0</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:7px 6px;">+ Manual cash-in</td>
+                            <td style="padding:7px 6px; text-align:right;" id="audSysCashIn">&#8377;0</td>
+                            <td style="padding:4px 6px; text-align:right;"><input type="number" id="audCashIn" class="input aud-in" oninput="recalcAuditTotals()"></td>
+                        </tr>
+                        <tr>
+                            <td style="padding:7px 6px;">&minus; Cash expenses out</td>
+                            <td style="padding:7px 6px; text-align:right;" id="audSysExpenses">&#8377;0</td>
+                            <td style="padding:4px 6px; text-align:right;"><input type="number" id="audExpenses" class="input aud-in" oninput="recalcAuditTotals()"></td>
+                        </tr>
+                        <tr style="border-top:2px solid var(--border, rgba(255,255,255,0.12));">
+                            <td style="padding:9px 6px; font-weight:700;">Expected closing</td>
+                            <td style="padding:9px 6px; text-align:right;" id="audSysExpected">&#8377;0</td>
+                            <td style="padding:9px 10px; text-align:right; font-weight:700; font-size:1.05rem; color:var(--primary);" id="audExpected">&#8377;0</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:7px 6px;">Counted closing <span class="text-muted" style="font-size:0.75rem;">(staff)</span></td>
+                            <td style="padding:7px 6px; text-align:right;" id="audSysCounted">&mdash;</td>
+                            <td style="padding:4px 6px; text-align:right;"><input type="number" id="audCounted" class="input aud-in" oninput="recalcAuditTotals()"></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="margin-top:14px;">
+                <label class="text-muted" style="font-size:0.8rem;">Note <span id="auditNoteHint"></span></label>
+                <input type="text" id="auditNote" class="input" placeholder="e.g. ₹200 short — staff paid the milk vendor without a slip" style="margin-top:4px;">
+            </div>
+
+            <div class="flex gap-2" style="margin-top:12px; flex-wrap:wrap;">
+                <button class="btn btn-success" onclick="saveDailyAudit()" style="flex:2; min-width:150px;">💾 Save Audit</button>
+                <button class="btn btn-secondary" onclick="exportAuditExcel()" style="flex:1; min-width:130px;">📥 Export this day</button>
+                <button class="btn btn-secondary btn-sm" onclick="runDailyAudit()" title="Discard edits and re-read the figures from the POS">🔄 Reset to POS</button>
+            </div>
+            <div id="auditSavedMeta" class="text-muted" style="font-size:0.75rem; margin-top:8px;"></div>
+        </div>
+    </div>
+
+    <!-- ── EXPENSES ON THIS DATE ── -->
+    <div class="card" style="margin-top:18px;">
+        <h4 style="margin-bottom:4px;">🧾 Cash expenses on this date</h4>
+        <p class="text-muted" style="font-size:0.8rem; margin-bottom:12px;">
+            Anything you add here is recorded as a normal cash expense, so the outlet's own
+            &#128176; Cash tab shows it too. Re-run the audit afterwards to pick it up.
+        </p>
+        <div id="auditExpenseList" style="margin-bottom:12px;"></div>
+        <div class="flex gap-2" style="flex-wrap:wrap;">
+            <input type="number" id="auditExpAmount" class="input" placeholder="₹" style="margin:0; max-width:100px; text-align:right;">
+            <select id="auditExpCategory" class="input" style="margin:0; max-width:150px;">
+                <option value="Local Market">Local Market</option>
+                <option value="Chicken">Chicken</option>
+                <option value="Vegetable">Vegetable</option>
+                <option value="Flipkart">Flipkart</option>
+                <option value="Amazon">Amazon</option>
+                <option value="Blinkit">Blinkit</option>
+                <option value="JioMart">JioMart</option>
+                <option value="Other">Other</option>
+            </select>
+            <input type="text" id="auditExpNote" class="input" placeholder="Note (optional)" style="margin:0; flex:1; min-width:120px;">
+            <button class="btn btn-danger btn-sm" onclick="addAuditExpense()" style="white-space:nowrap;">&minus; Add expense</button>
+        </div>
+    </div>
+
+    <!-- ── SAVED AUDITS ── -->
+    <div class="card" style="margin-top:18px;">
+        <div class="flex justify-between items-center" style="margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+            <h4 style="margin:0;">📚 Saved audits</h4>
+            <div class="flex gap-2 items-center" style="flex-wrap:wrap;">
+                <input type="date" id="auditHistFrom" class="input" style="margin:0; padding:6px 8px; font-size:0.82rem;">
+                <input type="date" id="auditHistTo" class="input" style="margin:0; padding:6px 8px; font-size:0.82rem;">
+                <button class="btn btn-secondary btn-sm" onclick="loadSavedAudits()">Load</button>
+                <button class="btn btn-secondary btn-sm" onclick="exportAuditRangeExcel()">📥 Export range</button>
+            </div>
+        </div>
+        <div id="auditHistoryResult">
+            <p class="text-muted text-center" style="font-size:0.85rem;">Pick a range and tap Load.</p>
+        </div>
+    </div>
+</div>
 <div id="adm-view-inventory" class="hidden">
 
     <!-- ── SECTION 1: Stock Tracker ── -->
@@ -1838,6 +1977,517 @@ async function loadCashReport() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
+//  DAILY AUDIT (admin) — reconcile one day's cash in one place
+// ══════════════════════════════════════════════════════════════
+// The check, in the outlet's own words:
+//
+//     opening + (total sales − online payments) + manual cash-in
+//       − cash expenses  =  the cash actually counted at close
+//
+// Everything is computed from what the POS already recorded. The admin
+// verifies the online total against the bank / UPI account and may correct
+// any figure; the variance recomputes live. Saved to `dailyAudits`, one
+// document per date (doc id = YYYY-MM-DD).
+//
+// Admin corrections are stored ALONGSIDE the system figures, never on top of
+// them — `auto` keeps what the POS said, `final` keeps what the admin signed
+// off. That way a later reader can always see what was changed and by how
+// much. The one exception is an expense added here: that is a real cash
+// movement, so it is written to `cashEntries` like any other expense.
+
+let AUDIT_STATE = null;   // { date, auto:{…}, expenses:[…], saved:{…}|null, warnings:[…] }
+
+function _inr(n) { return '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN'); }
+function _audNum(id) {
+    const el = document.getElementById(id);
+    const v = parseFloat(el && el.value);
+    return isNaN(v) ? 0 : Math.round(v);
+}
+
+// Cash actually counted at close on `date`: a saved audit's signed-off figure
+// wins, otherwise the latest reconciliation the staff recorded in the POS.
+async function _countedClosingFor(date) {
+    const { collection, query, where, getDocs, doc, getDoc } = window.firebaseModules;
+    try {
+        const a = await getDoc(doc(window.db, 'dailyAudits', date));
+        if (a.exists() && a.data().final && typeof a.data().final.countedClosing === 'number') {
+            return a.data().final.countedClosing;
+        }
+    } catch (e) { /* fall through to the staff count */ }
+    try {
+        const snap = await getDocs(query(collection(window.db, 'cashChecks'), where('date', '==', date)));
+        let latest = null;
+        snap.forEach(d => {
+            const c = d.data();
+            if (!latest || tsMillis(c.createdAt) > tsMillis(latest.createdAt)) latest = c;
+        });
+        return latest ? latest.counted : null;
+    } catch (e) { return null; }
+}
+
+// Read everything the POS knows about `date`.
+async function computeAuditForDate(date) {
+    const { collection, query, where, getDocs } = window.firebaseModules;
+
+    // 1. Cash box entries
+    const entriesSnap = await getDocs(query(collection(window.db, 'cashEntries'), where('date', '==', date)));
+    let opening = 0, manualCashIn = 0, cashExpenses = 0, hasOpening = false;
+    const expenses = [];
+    entriesSnap.forEach(d => {
+        const e = { id: d.id, ...d.data() };
+        if (e.type === 'opening') { opening = e.amount || 0; hasOpening = true; }
+        else if (e.type === 'in') manualCashIn += (e.amount || 0);
+        else if (e.type === 'out') { cashExpenses += (e.amount || 0); expenses.push(e); }
+    });
+
+    // 2. Completed orders on that local day
+    const start = new Date(date + 'T00:00:00');
+    const end   = new Date(date + 'T23:59:59.999');
+    const ordersSnap = await getDocs(query(collection(window.db, 'orders'),
+        where('timestamp', '>=', start), where('timestamp', '<=', end)));
+
+    let totalSales = 0, onlineSales = 0, cashSalesPos = 0, orderCount = 0, redeemed = 0;
+    const splitMismatches = [];
+    ordersSnap.forEach(d => {
+        const o = d.data();
+        if (o.status !== 'completed') return;
+        const amt = (o.finalPaid !== undefined ? o.finalPaid : o.total) || 0;
+        orderCount++;
+        totalSales += amt;
+        redeemed   += (o.redeemed || 0);
+
+        const hasSplit = (typeof o.cashAmount === 'number') || (typeof o.onlineAmount === 'number');
+        if (hasSplit) {
+            const c = o.cashAmount || 0, on = o.onlineAmount || 0;
+            cashSalesPos += c;
+            onlineSales  += on;
+            // A split that doesn't add up to the bill silently skews the whole day.
+            if (Math.abs((c + on) - amt) > 0.5) {
+                splitMismatches.push(`#${(d.id || '').slice(-5)} ${escAttr(o.customerName || '')} — bill ${_inr(amt)} but split records ${_inr(c + on)}`);
+            }
+        } else if ((o.paymentMode || 'Cash') === 'Online') {
+            onlineSales += amt;
+        } else {
+            cashSalesPos += amt;
+        }
+    });
+
+    // 3. What staff counted, and yesterday's close (cash should carry over)
+    const prev = new Date(start); prev.setDate(prev.getDate() - 1);
+    const prevDate = _localDateStr(prev);
+    const [countedByStaff, prevClosing] = await Promise.all([
+        _countedClosingFor(date),
+        _countedClosingFor(prevDate)
+    ]);
+
+    const cashSales = totalSales - onlineSales;
+    const auto = {
+        opening, totalSales, onlineSales, cashSales, manualCashIn, cashExpenses,
+        expectedClosing: opening + cashSales + manualCashIn - cashExpenses,
+        countedByStaff, orderCount, redeemed, prevDate, prevClosing
+    };
+
+    // 4. Things worth the admin's attention
+    const warnings = [];
+    if (!hasOpening) warnings.push('No opening balance was set for this date — it is being treated as ₹0.');
+    if (countedByStaff === null) warnings.push('Staff never counted the cash box on this date. Enter the closing amount yourself.');
+    if (prevClosing !== null && hasOpening && prevClosing !== opening) {
+        warnings.push(`Opening (${_inr(opening)}) does not match ${prevDate} closing (${_inr(prevClosing)}) — a gap of ${_inr(Math.abs(opening - prevClosing))} between the two days.`);
+    }
+    if (splitMismatches.length) {
+        warnings.push(`${splitMismatches.length} order(s) have a cash/online split that does not add up to the bill: ${splitMismatches.slice(0, 3).join('; ')}${splitMismatches.length > 3 ? ' …' : ''}`);
+    }
+    if (orderCount === 0) warnings.push('No completed orders on this date.');
+
+    return { auto, expenses, warnings };
+}
+
+// Recompute the derived rows from whatever is currently typed in.
+function recalcAuditTotals() {
+    if (!AUDIT_STATE) return;
+    const cashSales = _audNum('audTotalSales') - _audNum('audOnline');
+    const expected  = _audNum('audOpening') + cashSales + _audNum('audCashIn') - _audNum('audExpenses');
+    const counted   = _audNum('audCounted');
+    const variance  = counted - expected;
+
+    document.getElementById('audCashSales').innerText = _inr(cashSales);
+    document.getElementById('audExpected').innerText  = _inr(expected);
+
+    const bar = document.getElementById('auditStatusBar');
+    if (variance === 0) {
+        bar.style.background = 'rgba(76,175,80,0.16)';
+        bar.style.color = 'var(--success)';
+        bar.innerHTML = `✅ AUDIT MATCHES — expected ${_inr(expected)}, counted ${_inr(counted)}.`;
+    } else if (variance < 0) {
+        bar.style.background = 'rgba(255,82,82,0.16)';
+        bar.style.color = 'var(--danger)';
+        bar.innerHTML = `⚠️ SHORT BY ${_inr(Math.abs(variance))} — expected ${_inr(expected)}, counted ${_inr(counted)}.`;
+    } else {
+        bar.style.background = 'rgba(255,149,0,0.16)';
+        bar.style.color = '#FF9500';
+        bar.innerHTML = `⚠️ EXCESS OF ${_inr(variance)} — expected ${_inr(expected)}, counted ${_inr(counted)}.`;
+    }
+
+    const hint = document.getElementById('auditNoteHint');
+    hint.innerHTML = variance === 0 ? '' : '<span style="color:var(--warning);">— required while there is a variance</span>';
+
+    // Show how far the admin has moved the online figure away from the POS
+    const sysOnline = AUDIT_STATE.auto.onlineSales;
+    const delta = _audNum('audOnline') - sysOnline;
+    const cell = document.getElementById('audSysOnline');
+    cell.innerHTML = delta === 0
+        ? _inr(sysOnline)
+        : `${_inr(sysOnline)} <span style="color:var(--warning); font-size:0.75rem;">(${delta > 0 ? '+' : '−'}${_inr(Math.abs(delta))})</span>`;
+
+    return { cashSales, expected, counted, variance };
+}
+
+async function runDailyAudit() {
+    const date = document.getElementById('auditDate').value;
+    if (!date) return showToast('Pick a date first', 'error');
+    const { doc, getDoc } = window.firebaseModules;
+
+    document.getElementById('auditEmpty').classList.remove('hidden');
+    document.getElementById('auditEmpty').innerText = 'Reading the day…';
+    document.getElementById('auditBody').classList.add('hidden');
+
+    try {
+        const { auto, expenses, warnings } = await computeAuditForDate(date);
+        let saved = null;
+        try {
+            const s = await getDoc(doc(window.db, 'dailyAudits', date));
+            if (s.exists()) saved = s.data();
+        } catch (e) { /* no saved audit yet */ }
+
+        AUDIT_STATE = { date, auto, expenses, saved, warnings };
+
+        // System column
+        document.getElementById('audSysOpening').innerText    = _inr(auto.opening);
+        document.getElementById('audSysTotalSales').innerText = _inr(auto.totalSales);
+        document.getElementById('audSysOnline').innerText     = _inr(auto.onlineSales);
+        document.getElementById('audSysCashSales').innerText  = _inr(auto.cashSales);
+        document.getElementById('audSysCashIn').innerText     = _inr(auto.manualCashIn);
+        document.getElementById('audSysExpenses').innerText   = _inr(auto.cashExpenses);
+        document.getElementById('audSysExpected').innerText   = _inr(auto.expectedClosing);
+        document.getElementById('audSysCounted').innerText    = auto.countedByStaff === null ? '—' : _inr(auto.countedByStaff);
+
+        // Verified column — a saved audit's figures win, otherwise the system's
+        const f = (saved && saved.final) || {};
+        const pick = (k, fallback) => (typeof f[k] === 'number' ? f[k] : fallback);
+        document.getElementById('audOpening').value    = pick('opening', auto.opening);
+        document.getElementById('audTotalSales').value = pick('totalSales', auto.totalSales);
+        document.getElementById('audOnline').value     = pick('onlineSales', auto.onlineSales);
+        document.getElementById('audCashIn').value     = pick('manualCashIn', auto.manualCashIn);
+        document.getElementById('audExpenses').value   = pick('cashExpenses', auto.cashExpenses);
+        document.getElementById('audCounted').value    = pick('countedClosing', auto.countedByStaff === null ? 0 : auto.countedByStaff);
+        document.getElementById('auditNote').value     = (saved && saved.note) || '';
+
+        document.getElementById('auditWarnings').innerHTML = warnings.length
+            ? warnings.map(w => `<div style="background:rgba(255,149,0,0.10); border:1px solid rgba(255,149,0,0.35); color:#FF9500; border-radius:8px; padding:8px 11px; margin-bottom:6px; font-size:0.8rem;">⚠️ ${w}</div>`).join('')
+            : '';
+
+        document.getElementById('auditSavedMeta').innerHTML = saved
+            ? `Saved by ${escAttr(saved.auditedBy || 'admin')} on ${saved.auditedAt ? new Date(tsMillis(saved.auditedAt)).toLocaleString('en-IN') : '—'}${saved.updatedAt && tsMillis(saved.updatedAt) !== tsMillis(saved.auditedAt) ? ` · last edited ${new Date(tsMillis(saved.updatedAt)).toLocaleString('en-IN')}` : ''}`
+            : 'Not saved yet.';
+
+        renderAuditExpenses();
+        document.getElementById('auditEmpty').classList.add('hidden');
+        document.getElementById('auditBody').classList.remove('hidden');
+        recalcAuditTotals();
+    } catch (e) {
+        console.error(e);
+        document.getElementById('auditEmpty').innerText = 'Error: ' + e.message;
+        showToast('Audit error: ' + e.message, 'error');
+    }
+}
+
+function renderAuditExpenses() {
+    const box = document.getElementById('auditExpenseList');
+    if (!AUDIT_STATE || !AUDIT_STATE.expenses.length) {
+        box.innerHTML = '<p class="text-muted" style="font-size:0.85rem;">No cash expenses recorded on this date.</p>';
+        return;
+    }
+    box.innerHTML = AUDIT_STATE.expenses
+        .sort((a, b) => tsMillis(b.createdAt) - tsMillis(a.createdAt))
+        .map(e => `
+            <div class="flex justify-between items-center" style="padding:7px 10px; border:1px solid var(--border, rgba(255,255,255,0.1)); border-radius:8px; margin-bottom:5px; font-size:0.85rem;">
+                <div>
+                    <div>${escAttr(e.category || 'Expense')}${e.note ? ` <span class="text-muted">· ${escAttr(e.note)}</span>` : ''}${e.source === 'admin-audit' ? ' <span style="font-size:0.68rem; color:var(--primary); font-weight:700;">ADMIN</span>' : ''}</div>
+                    <div class="text-muted" style="font-size:0.72rem;">${fmtClock(tsMillis(e.createdAt))}${e.staffName ? ' · 👤 ' + escAttr(e.staffName) : ''}</div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <strong style="color:#FF6B6B;">${_inr(e.amount)}</strong>
+                    <button class="btn btn-danger btn-sm" onclick="deleteAuditExpense('${e.id}')" style="padding:2px 7px; font-size:0.7rem;">✕</button>
+                </div>
+            </div>`).join('');
+}
+
+async function addAuditExpense() {
+    if (!AUDIT_STATE) return showToast('Run the audit first', 'error');
+    const amt = parseInt(document.getElementById('auditExpAmount').value);
+    if (isNaN(amt) || amt <= 0) return showToast('Enter a valid amount', 'error');
+    const category = document.getElementById('auditExpCategory').value;
+    const note = (document.getElementById('auditExpNote').value || '').trim();
+    const { collection, addDoc, serverTimestamp } = window.firebaseModules;
+    try {
+        await addDoc(collection(window.db, 'cashEntries'), {
+            type: 'out', amount: amt, category, note,
+            date: AUDIT_STATE.date,
+            staffName: 'Admin',
+            source: 'admin-audit',      // marks it as added during the audit, not at the counter
+            createdAt: serverTimestamp()
+        });
+        document.getElementById('auditExpAmount').value = '';
+        document.getElementById('auditExpNote').value = '';
+        showToast('Expense added', 'success');
+        runDailyAudit();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteAuditExpense(id) {
+    if (!confirm('Delete this cash expense? It will disappear from the outlet cash box too.')) return;
+    const { doc, deleteDoc } = window.firebaseModules;
+    try {
+        await deleteDoc(doc(window.db, 'cashEntries', id));
+        showToast('Expense deleted', 'success');
+        runDailyAudit();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function saveDailyAudit() {
+    if (!AUDIT_STATE) return showToast('Run the audit first', 'error');
+    const t = recalcAuditTotals();
+    const note = (document.getElementById('auditNote').value || '').trim();
+    if (t.variance !== 0 && !note) {
+        return showToast('Add a note explaining the variance before saving', 'error');
+    }
+    const { doc, setDoc, getDoc, serverTimestamp } = window.firebaseModules;
+    const date = AUDIT_STATE.date;
+    try {
+        let auditedAt = null;
+        try {
+            const prev = await getDoc(doc(window.db, 'dailyAudits', date));
+            if (prev.exists()) auditedAt = prev.data().auditedAt || null;
+        } catch (e) { /* first save */ }
+
+        await setDoc(doc(window.db, 'dailyAudits', date), {
+            date,
+            auto: AUDIT_STATE.auto,
+            final: {
+                opening:        _audNum('audOpening'),
+                totalSales:     _audNum('audTotalSales'),
+                onlineSales:    _audNum('audOnline'),
+                cashSales:      t.cashSales,
+                manualCashIn:   _audNum('audCashIn'),
+                cashExpenses:   _audNum('audExpenses'),
+                countedClosing: t.counted
+            },
+            expectedClosing: t.expected,
+            variance: t.variance,
+            status: t.variance === 0 ? 'matched' : (t.variance < 0 ? 'short' : 'excess'),
+            note,
+            auditedBy: (window.auth.currentUser && window.auth.currentUser.email) || 'admin',
+            auditedAt: auditedAt || serverTimestamp(),
+            updatedAt: serverTimestamp()
+        });
+        showToast(t.variance === 0 ? '✅ Audit saved — matched' : 'Audit saved with a variance', t.variance === 0 ? 'success' : 'warning');
+        runDailyAudit();
+        loadSavedAudits();
+    } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+}
+
+async function deleteDailyAudit(date) {
+    if (!confirm(`Delete the saved audit for ${date}?\n\nOnly the audit record goes — the day's orders, expenses and cash box entries are untouched.`)) return;
+    const { doc, deleteDoc } = window.firebaseModules;
+    try {
+        await deleteDoc(doc(window.db, 'dailyAudits', date));
+        showToast('Audit deleted', 'success');
+        loadSavedAudits();
+        if (AUDIT_STATE && AUDIT_STATE.date === date) runDailyAudit();
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+function openSavedAudit(date) {
+    document.getElementById('auditDate').value = date;
+    runDailyAudit();
+    document.getElementById('adm-view-audit').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function _fetchSavedAudits(from, to) {
+    const { collection, query, where, getDocs } = window.firebaseModules;
+    const snap = await getDocs(query(collection(window.db, 'dailyAudits'),
+        where('date', '>=', from), where('date', '<=', to)));
+    return snap.docs.map(d => d.data()).sort((a, b) => b.date.localeCompare(a.date));
+}
+
+async function loadSavedAudits() {
+    const from = document.getElementById('auditHistFrom').value;
+    const to   = document.getElementById('auditHistTo').value;
+    const box  = document.getElementById('auditHistoryResult');
+    if (!from || !to) return showToast('Select both dates', 'error');
+    if (from > to)   return showToast('From date must be before To date', 'error');
+    box.innerHTML = '<p class="text-muted text-center" style="font-size:0.85rem;">Loading…</p>';
+    try {
+        const list = await _fetchSavedAudits(from, to);
+        if (!list.length) {
+            box.innerHTML = '<p class="text-muted text-center" style="font-size:0.85rem;">No saved audits in this range.</p>';
+            return;
+        }
+        const matched = list.filter(a => a.variance === 0).length;
+        const net = list.reduce((s, a) => s + (a.variance || 0), 0);
+        box.innerHTML = `
+            <div class="text-muted" style="font-size:0.8rem; margin-bottom:10px;">
+                ${list.length} audit${list.length !== 1 ? 's' : ''} · ${matched} matched · net variance ${_inr(net)}
+            </div>` + list.map(a => {
+            const color = a.variance === 0 ? 'var(--success)' : (a.variance < 0 ? 'var(--danger)' : '#FF9500');
+            const label = a.variance === 0 ? '✅ MATCH' : (a.variance < 0 ? `SHORT ${_inr(Math.abs(a.variance))}` : `EXCESS ${_inr(a.variance)}`);
+            return `
+                <div style="padding:9px 11px; border:1px solid var(--border, rgba(255,255,255,0.1)); border-radius:8px; margin-bottom:6px;">
+                    <div class="flex justify-between items-center" style="flex-wrap:wrap; gap:6px;">
+                        <div>
+                            <strong>${a.date}</strong>
+                            <span style="color:${color}; font-weight:700; font-size:0.8rem; margin-left:8px;">${label}</span>
+                        </div>
+                        <div class="flex gap-2">
+                            <button class="btn btn-secondary btn-sm" onclick="openSavedAudit('${a.date}')" style="padding:3px 9px; font-size:0.72rem;">Open</button>
+                            <button class="btn btn-danger btn-sm" onclick="deleteDailyAudit('${a.date}')" style="padding:3px 9px; font-size:0.72rem;">Delete</button>
+                        </div>
+                    </div>
+                    <div class="text-muted" style="font-size:0.74rem; margin-top:4px;">
+                        Expected ${_inr(a.expectedClosing)} · counted ${_inr(a.final ? a.final.countedClosing : 0)} · sales ${_inr(a.final ? a.final.totalSales : 0)} (online ${_inr(a.final ? a.final.onlineSales : 0)})
+                    </div>
+                    ${a.note ? `<div class="text-muted" style="font-size:0.74rem; margin-top:3px;">📝 ${escAttr(a.note)}</div>` : ''}
+                </div>`;
+        }).join('');
+    } catch (e) {
+        console.error(e);
+        box.innerHTML = `<p class="text-danger text-center" style="font-size:0.85rem;">Error: ${e.message}</p>`;
+    }
+}
+
+// ── EXCEL EXPORT ──────────────────────────────────────────────
+function _auditRows(a) {
+    const f = a.final || {}, s = a.auto || {};
+    return [
+        ['Item', 'System (POS)', 'Verified (admin)'],
+        ['Opening balance',      s.opening || 0,        f.opening || 0],
+        ['Total sales',          s.totalSales || 0,     f.totalSales || 0],
+        ['Online payments',      s.onlineSales || 0,    f.onlineSales || 0],
+        ['Cash sales',           s.cashSales || 0,      f.cashSales || 0],
+        ['Manual cash-in',       s.manualCashIn || 0,   f.manualCashIn || 0],
+        ['Cash expenses out',    s.cashExpenses || 0,   f.cashExpenses || 0],
+        ['Expected closing',     s.expectedClosing || 0, a.expectedClosing || 0],
+        ['Counted closing',      s.countedByStaff === null || s.countedByStaff === undefined ? '—' : s.countedByStaff, (f.countedClosing || 0)],
+        ['VARIANCE',             '', a.variance || 0],
+        ['Status',               '', (a.status || '').toUpperCase()],
+        ['Note',                 '', a.note || ''],
+        ['Orders completed',     s.orderCount || 0, ''],
+        ['Points redeemed (₹)',  s.redeemed || 0, ''],
+        ['Audited by',           '', a.auditedBy || '']
+    ];
+}
+
+async function exportAuditExcel() {
+    if (!_xlsxReady()) return;
+    if (!AUDIT_STATE) return showToast('Run the audit first', 'error');
+    const t = recalcAuditTotals();
+    // Export exactly what is on screen, saved or not
+    const a = {
+        date: AUDIT_STATE.date,
+        auto: AUDIT_STATE.auto,
+        final: {
+            opening: _audNum('audOpening'), totalSales: _audNum('audTotalSales'),
+            onlineSales: _audNum('audOnline'), cashSales: t.cashSales,
+            manualCashIn: _audNum('audCashIn'), cashExpenses: _audNum('audExpenses'),
+            countedClosing: t.counted
+        },
+        expectedClosing: t.expected,
+        variance: t.variance,
+        status: t.variance === 0 ? 'matched' : (t.variance < 0 ? 'short' : 'excess'),
+        note: (document.getElementById('auditNote').value || '').trim(),
+        auditedBy: (window.auth.currentUser && window.auth.currentUser.email) || 'admin'
+    };
+    const rows = [
+        ['DAILY CASH AUDIT'],
+        [`Date: ${a.date}`, '', `Generated: ${new Date().toLocaleString('en-IN')}`],
+        []
+    ].concat(_auditRows(a));
+
+    if (AUDIT_STATE.expenses.length) {
+        rows.push([], ['CASH EXPENSES'], ['Time', 'Category', 'Note', 'Amount (₹)', 'Recorded by']);
+        AUDIT_STATE.expenses
+            .sort((x, y) => tsMillis(x.createdAt) - tsMillis(y.createdAt))
+            .forEach(e => rows.push([fmtClock(tsMillis(e.createdAt)), e.category || 'Expense', e.note || '', e.amount || 0, e.staffName || '']));
+    }
+    if (AUDIT_STATE.warnings.length) {
+        rows.push([], ['FLAGS']);
+        AUDIT_STATE.warnings.forEach(w => rows.push(['', w]));
+    }
+
+    _saveWorkbook([{ name: 'Audit ' + a.date, rows, widths: [26, 18, 20, 14, 16] }], `Cash_Audit_${a.date}.xlsx`);
+    showToast('Audit exported', 'success');
+}
+
+async function exportAuditRangeExcel() {
+    if (!_xlsxReady()) return;
+    const from = document.getElementById('auditHistFrom').value;
+    const to   = document.getElementById('auditHistTo').value;
+    if (!from || !to) return showToast('Select both dates', 'error');
+    if (from > to)   return showToast('From date must be before To date', 'error');
+    showToast('Building audit report…', 'info');
+    try {
+        const list = await _fetchSavedAudits(from, to);
+        if (!list.length) return showToast('No saved audits in this range', 'error');
+
+        const rows = [
+            ['DAILY CASH AUDIT — SUMMARY'],
+            [`Range: ${from} to ${to}`, '', `Generated: ${new Date().toLocaleString('en-IN')}`],
+            [],
+            ['Date', 'Opening (₹)', 'Total Sales (₹)', 'Online (₹)', 'Cash Sales (₹)', 'Cash-In (₹)', 'Expenses (₹)', 'Expected (₹)', 'Counted (₹)', 'Variance (₹)', 'Status', 'Note']
+        ];
+        const tot = { opening: 0, totalSales: 0, onlineSales: 0, cashSales: 0, manualCashIn: 0, cashExpenses: 0, expected: 0, counted: 0, variance: 0 };
+        list.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach(a => {
+            const f = a.final || {};
+            rows.push([a.date, f.opening || 0, f.totalSales || 0, f.onlineSales || 0, f.cashSales || 0,
+                f.manualCashIn || 0, f.cashExpenses || 0, a.expectedClosing || 0, f.countedClosing || 0,
+                a.variance || 0, (a.status || '').toUpperCase(), a.note || '']);
+            tot.opening += f.opening || 0; tot.totalSales += f.totalSales || 0;
+            tot.onlineSales += f.onlineSales || 0; tot.cashSales += f.cashSales || 0;
+            tot.manualCashIn += f.manualCashIn || 0; tot.cashExpenses += f.cashExpenses || 0;
+            tot.expected += a.expectedClosing || 0; tot.counted += f.countedClosing || 0;
+            tot.variance += a.variance || 0;
+        });
+        rows.push([]);
+        rows.push(['TOTAL', tot.opening, tot.totalSales, tot.onlineSales, tot.cashSales,
+            tot.manualCashIn, tot.cashExpenses, tot.expected, tot.counted, tot.variance, '', '']);
+        rows.push(['Days matched', list.filter(a => a.variance === 0).length, 'of', list.length]);
+
+        _saveWorkbook([{ name: 'Audit Summary', rows, widths: [12, 12, 14, 12, 13, 12, 13, 13, 12, 12, 10, 34] }],
+            `Cash_Audits_${from}_to_${to}.xlsx`);
+        showToast('Report downloaded', 'success');
+    } catch (e) {
+        console.error(e);
+        showToast('Export failed: ' + e.message, 'error');
+    }
+}
+
+// Opening the tab: default to today, and show the last 7 days of saved audits.
+function initAuditTab() {
+    const today = todayStr();
+    const el = document.getElementById('auditDate');
+    if (!el.value) el.value = today;
+    const from = document.getElementById('auditHistFrom');
+    const to   = document.getElementById('auditHistTo');
+    if (!from.value || !to.value) {
+        const d = new Date(); d.setDate(d.getDate() - 6);
+        from.value = _localDateStr(d);
+        to.value = today;
+    }
+    runDailyAudit();
+    loadSavedAudits();
+}
+
 //  REPORTS & EXCEL EXPORT (admin)
 // ══════════════════════════════════════════════════════════════
 
@@ -2189,11 +2839,37 @@ onMessage(messaging, (payload) => {
     });
 }
 
+        // ── ADMIN ACCOUNTS ────────────────────────────────────────────────
+        // An account counts as admin if its e-mail is listed here OR if it has a
+        // staff/{uid} document with role 'admin'. The e-mail route exists because
+        // the Birati project has no staff document for its admin accounts.
+        //
+        // Compared lowercased and trimmed on purpose: Firebase hands back the
+        // address exactly as it was registered, so one stray capital would drop
+        // the admin into the staff branch and into the outlet location gate.
+        //
+        // Adding a new admin: put the e-mail here, or give the account a
+        // staff/{uid} doc with role 'admin'. Remember firestore.rules has its own
+        // admin check that may need the same address.
+        const ADMIN_EMAILS = ['admin@jt.com', 'titir95biplab@gmail.com'];
+        function isAdminEmail(email) {
+            return ADMIN_EMAILS.indexOf(String(email || '').trim().toLowerCase()) !== -1;
+        }
         async function checkUserRole(user) {
             // Load Store Settings for everyone (needed for bills)
             loadStoreSettings();
             // Load operational staff roster (powers POS staff selector + admin staff list)
             loadStaffRoster();
+
+            // Admin first — must run before the staff branch, which is location-gated.
+            if (isAdminEmail(user.email)) {
+                STATE.role = 'admin';
+                showPanel('adminPanel');
+                loadCategories();
+                loadMenu();
+                loadAnalytics();
+                return;
+            }
 
             const { doc, getDoc } = window.firebaseModules;
             try {
@@ -2264,6 +2940,16 @@ onMessage(messaging, (payload) => {
                 ${showRetry ? `<button onclick="gateOutletPanel()" style="background:#00D4FF;color:#062634;border:none;padding:12px 22px;border-radius:8px;font-weight:700;font-size:1rem;cursor:pointer;">🔄 Retry — I'm at the shop</button>
                 <button onclick="outletLockLogout()" style="display:block;margin:14px auto 0;background:transparent;color:#7f95a8;border:none;font-size:0.82rem;cursor:pointer;">Log out</button>` : ''}
             </div>`;
+            // Say who is signed in. If an admin ever lands on this screen the account
+            // was not recognised as admin — add it to ADMIN_EMAILS above, or give it a
+            // staff/{uid} document with role 'admin'.
+            try {
+                const who = (window.auth && window.auth.currentUser && window.auth.currentUser.email) || 'not signed in';
+                const info = document.createElement('div');
+                info.style.cssText = 'font-size:0.72rem;opacity:0.55;margin-top:20px;line-height:1.5;';
+                info.innerHTML = `Signed in as <b>${escAttr(who)}</b><br>Only outlet staff are location-checked — admin accounts are not.`;
+                el.firstElementChild.appendChild(info);
+            } catch (e) { /* diagnostic only */ }
         }
         function hideOutletLock() {
             const el = document.getElementById('outletLocLock');
@@ -2455,7 +3141,7 @@ async function restoreCustomerSession(phone) {
 
         // --- ADMIN SETTINGS & TABS ---
         function switchAdminTab(tab) {
-            ['dashboard', 'menu', 'orders', 'settings', 'notify', 'inventory', 'cash'].forEach(t => {
+            ['dashboard', 'menu', 'orders', 'settings', 'notify', 'inventory', 'cash', 'audit'].forEach(t => {
                 const btn = document.getElementById(`btn-adm-${t}`);
                 const view = document.getElementById(`adm-view-${t}`);
                 if(btn) btn.classList.remove('active');
@@ -2487,6 +3173,7 @@ async function restoreCustomerSession(phone) {
     if(tab === 'menu') updateCategorySelects();
     if(tab === 'notify') loadAdminNotificationHistory();
     if(tab === 'settings') loadCoupons(); // Load coupons when settings tab is opened
+    if(tab === 'audit') initAuditTab();
     if(tab === 'inventory') {
         loadAdminIngredients();
         loadRecipeItemDropdown();
@@ -3659,6 +4346,20 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             // C. Update the Order Document
             const subtotal = newItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
             
+            // Keep the cash / online split in step with the edited total. Without this
+            // the order still reports its ORIGINAL cashAmount, so the cash box and the
+            // daily audit over- or under-count the day. The online leg is a real bank
+            // transaction, so it is preserved and the cash leg absorbs the difference.
+            const oldOnlinePaid = oldOrderData.onlineAmount || 0;
+            let editCashAmount, editOnlineAmount;
+            if (newMode === 'Online') {
+                editOnlineAmount = newTotal; editCashAmount = 0;
+            } else if (newMode === 'Partial') {
+                editOnlineAmount = Math.min(oldOnlinePaid, newTotal);
+                editCashAmount = newTotal - editOnlineAmount;
+            } else {
+                editCashAmount = newTotal; editOnlineAmount = 0;
+            }
             transaction.update(orderRef, {
                 customerName: newName,
                 phone: newPhone,
@@ -3668,7 +4369,9 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
                 discount: TEMP_EDIT_DISCOUNT, 
                 paymentMode: newMode,
                 items: newItems,
-                bonusEarned: newBonus 
+                bonusEarned: newBonus,
+                cashAmount: editCashAmount,
+                onlineAmount: editOnlineAmount
             });
         });
         

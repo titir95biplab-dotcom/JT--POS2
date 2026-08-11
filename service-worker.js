@@ -29,11 +29,15 @@ messaging.onBackgroundMessage((payload) => {
 
 
 // ── PWA CACHING ──────────────────────────────────────────
-const CACHE_NAME = 'jt-majherhati-pos-v11';
+// Bump CACHE_NAME on every deploy so installed devices pick up the new build.
+// Every entry below must actually exist: cache.addAll() rejects as a whole if a
+// single URL 404s, which silently kills offline caching. ('./kot.html' used to be
+// listed here and does not exist — the KOT app is a separate Firebase Hosting
+// deployment under 'kot app/'.)
+const CACHE_NAME = 'jt-majherhati-pos-v13';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
-  './kot.html',
   './manifest.json',
   './logo.png'
 ];
