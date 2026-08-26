@@ -409,6 +409,9 @@ async function trackUserActivity(phone) {
         <label class="text-muted">Image URL (Optional)</label>
         <input type="text" id="notifImage" class="input" placeholder="https://...">
         
+        <div id="notifDeviceStatus" style="font-size:0.8rem; margin:10px 0; padding:8px 10px; border-radius:8px; background:rgba(128,128,128,0.10); line-height:1.5;">
+            <span class="text-muted">Checking registered devices…</span>
+        </div>
         <button class="btn btn-primary w-full" onclick="sendBroadcastNotification()">🚀 Send to All Devices</button>
     </div>
     
@@ -3336,7 +3339,7 @@ async function restoreCustomerSession(phone) {
     }
     
     if(tab === 'menu') updateCategorySelects();
-    if(tab === 'notify') loadAdminNotificationHistory();
+    if(tab === 'notify') { loadAdminNotificationHistory(); loadNotifyDeviceStatus(); }
     if(tab === 'settings') loadCoupons(); // Load coupons when settings tab is opened
     if(tab === 'audit') initAuditTab();
     if(tab === 'inventory') {
@@ -3358,6 +3361,30 @@ async function restoreCustomerSession(phone) {
             hf.value = _localDateStr(w);
             ht.value = _localDateStr(t);
         }
+    }
+}
+
+// How many customer devices actually hold a push token. If this is 0, no
+// broadcast can arrive no matter what the Cloud Function does — usually the
+// Web Push (VAPID) key does not match this Firebase project.
+async function loadNotifyDeviceStatus() {
+    const el = document.getElementById('notifDeviceStatus');
+    if (!el) return;
+    el.innerHTML = '<span class="text-muted">Checking registered devices…</span>';
+    try {
+        const { collection, getDocs } = window.firebaseModules;
+        const snap = await getDocs(collection(window.db, 'customers'));
+        let withToken = 0, total = 0;
+        snap.forEach(d => { total++; if (d.data().fcmToken) withToken++; });
+        if (withToken === 0) {
+            el.innerHTML = `<b style="color:var(--danger);">⚠️ 0 of ${total} customers have a push token.</b>`
+                + `<br><span class="text-muted">A broadcast will reach nobody. Usually the Web Push (VAPID) key in the app does not match this Firebase project — check Project settings → Cloud Messaging → Web Push certificates.</span>`;
+        } else {
+            el.innerHTML = `<b style="color:var(--success);">📲 ${withToken}</b> of ${total} customers can receive push`
+                + `<br><span class="text-muted">Notifications arrive even with the app closed, as long as the customer allowed them.</span>`;
+        }
+    } catch (e) {
+        el.innerHTML = `<span class="text-muted">Could not check devices: ${e.message}</span>`;
     }
 }
 
@@ -7136,30 +7163,49 @@ async function retryPermission() {
     }
 }
 
-// NEW TOKEN SAVING LOGIC (Separated for clarity)
+// ⚠️ THIS KEY IS PER FIREBASE PROJECT.
+// Firebase Console → Project settings → Cloud Messaging → Web Push certificates.
+// Using another project's key makes getToken() fail, so no device ever registers
+// and no broadcast can arrive — with no visible symptom until you check the
+// registered-device count in Admin → Notify.
+const FCM_VAPID_KEY = 'BNMWPFfWtc6-5ZSm0Eru3u3f-iB7zSpzY2vlHos7HEjbKQPfstSGgFXSnzivajBU4fto4oSKlWCQJwhtjKmNzLQ';
+
 async function getAndSaveToken() {
     try {
         const { getToken, messaging } = window.firebaseModules;
         const registration = await navigator.serviceWorker.ready;
 
-        const token = await getToken(messaging, { 
-            vapidKey: 'BNMWPFfWtc6-5ZSm0Eru3u3f-iB7zSpzY2vlHos7HEjbKQPfstSGgFXSnzivajBU4fto4oSKlWCQJwhtjKmNzLQ', // YOUR KEY HERE
+        const token = await getToken(messaging, {
+            vapidKey: FCM_VAPID_KEY,
             serviceWorkerRegistration: registration
         });
 
-        if (token) {
-            console.log('FCM Token:', token);
-            // Save to DB
-            if (STATE.user && STATE.user.phone) {
-                 const { doc, setDoc, serverTimestamp } = window.firebaseModules;
-                 await setDoc(doc(window.db, 'customers', STATE.user.phone), {
-                    fcmToken: token,
-                    lastLogin: serverTimestamp()
-                }, { merge: true });
-            }
+        if (!token) {
+            console.warn('FCM returned no token.');
+            return;
+        }
+        console.log('FCM Token:', token.slice(0, 24) + '…');
+
+        // Only a logged-in customer has somewhere to store it.
+        if (STATE.user && STATE.user.phone) {
+            const { doc, setDoc, serverTimestamp } = window.firebaseModules;
+            await setDoc(doc(window.db, 'customers', STATE.user.phone), {
+                fcmToken: token,
+                lastLogin: serverTimestamp()
+            }, { merge: true });
+            console.log('FCM token saved for', STATE.user.phone);
         }
     } catch (err) {
         console.error('Token Error:', err);
+        // A silent failure here means notifications simply never work, so say so.
+        const code = err && err.code ? err.code : '';
+        let msg = 'Notifications could not be enabled on this device.';
+        if (code.indexOf('permission') !== -1) {
+            msg = 'Notifications are blocked for this site. Allow them in browser settings.';
+        } else if (code.indexOf('token-subscribe') !== -1 || code.indexOf('invalid') !== -1) {
+            msg = 'Push setup failed — the Web Push (VAPID) key may not match this Firebase project.';
+        }
+        if (typeof showToast === 'function') showToast(msg, 'error');
     }
 }
 
