@@ -7003,6 +7003,93 @@ async function printBillDirect(orderId) {
 // PWA INSTALLATION LOGIC — Maximum Compatibility
 // ==========================================
 let deferredPrompt = null;
+window.__bipFired = false;
+
+// ── INSTALL / NOTIFICATION DIAGNOSTICS ────────────────────────────────────
+// Open the app with ?diag=1 to see what this device actually reports. Chrome
+// only offers "Install app" when every requirement is met, and it never says
+// which one failed — this panel does.
+async function runInstallDiagnostics() {
+    const rows = [];
+    // info: true => neutral row, neither pass nor fail
+    const add = (label, ok, detail, info) => rows.push({ label, ok, detail: detail || '', info: !!info });
+
+    const ua = navigator.userAgent;
+    const chrome = (ua.match(/Chrome\/(\d+)/) || [])[1];
+    const isRealChrome = /Chrome\//.test(ua) && !/(EdgA|OPR|SamsungBrowser|MiuiBrowser|wv)/.test(ua);
+
+    add('Secure context (https)', window.isSecureContext, location.protocol);
+    add('Real Chrome (not in-app browser)', isRealChrome,
+        isRealChrome ? ('Chrome ' + (chrome || '?')) : 'in-app/other browser — install is never offered here');
+    add('Chrome recent enough', !chrome || Number(chrome) >= 90, chrome ? ('version ' + chrome) : 'unknown');
+    add('Already installed', isInStandaloneMode(),
+        isInStandaloneMode() ? 'running standalone — that is why install is not offered' : 'running in a browser tab (normal before installing)',
+        true);
+
+    // Service worker
+    let swOk = false, swDetail = 'not supported';
+    if ('serviceWorker' in navigator) {
+        try {
+            const reg = await navigator.serviceWorker.getRegistration();
+            swOk = !!reg; swDetail = reg ? ('scope ' + reg.scope) : 'not registered yet — reload once';
+        } catch (e) { swDetail = e.message; }
+    }
+    add('Service worker registered', swOk, swDetail);
+
+    // Manifest
+    let manOk = false, manDetail = '';
+    try {
+        const link = document.querySelector('link[rel="manifest"]');
+        const res = await fetch(link.href, { cache: 'no-cache' });
+        const m = await res.json();
+        const icon = (m.icons || [])[0];
+        manOk = !!(m.name && m.start_url && m.display && icon);
+        manDetail = `${m.name} · ${m.display} · icon ${icon ? icon.sizes : 'MISSING'}`;
+    } catch (e) { manDetail = 'could not load manifest: ' + e.message; }
+    add('Manifest valid', manOk, manDetail);
+
+    add('Browser offered install', window.__bipFired,
+        window.__bipFired ? 'beforeinstallprompt fired — use the Install button or menu'
+                          : 'never fired. If everything above is green, this is the phone: Chrome menu ⋮ → Add to Home screen still works.');
+
+    // Notifications
+    add('Notification permission', Notification.permission === 'granted', Notification.permission);
+    let tokenOk = false, tokenDetail = 'not attempted';
+    if (Notification.permission === 'granted') {
+        try {
+            const reg = await navigator.serviceWorker.ready;
+            const { getToken, messaging } = window.firebaseModules;
+            const t = await getToken(messaging, { vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: reg });
+            tokenOk = !!t; tokenDetail = t ? (t.slice(0, 18) + '…') : 'no token returned';
+        } catch (e) { tokenDetail = (e.code || '') + ' ' + e.message; }
+    }
+    add('Push token obtained', tokenOk, tokenDetail);
+
+    const html = rows.map(r =>
+        `<div style="display:flex; gap:8px; padding:7px 0; border-bottom:1px solid rgba(128,128,128,0.18);">
+            <div style="flex-shrink:0;">${r.info ? 'ℹ️' : (r.ok ? '✅' : '❌')}</div>
+            <div><div style="font-weight:600; font-size:0.85rem;">${r.label}</div>
+            <div class="text-muted" style="font-size:0.74rem; word-break:break-word;">${escAttr(r.detail)}</div></div>
+         </div>`).join('');
+
+    const el = document.createElement('div');
+    el.style.cssText = 'position:fixed;inset:0;z-index:100000;background:var(--bg);padding:18px;overflow:auto;';
+    el.innerHTML = `<div style="max-width:520px;margin:0 auto;">
+        <h3 style="margin-bottom:4px;">🩺 Install &amp; Notification Check</h3>
+        <p class="text-muted" style="font-size:0.76rem;margin-bottom:12px;word-break:break-word;">${escAttr(ua)}</p>
+        ${html}
+        <button class="btn btn-primary w-full" style="margin-top:16px;" onclick="this.parentElement.parentElement.remove()">Close</button>
+    </div>`;
+    document.body.appendChild(el);
+}
+
+if (new URLSearchParams(location.search).get('diag') === '1') {
+    // 'load' may already have fired by the time this runs on a big page, in which
+    // case addEventListener would never call back and the panel would not appear.
+    const openDiag = () => setTimeout(runInstallDiagnostics, 1200);
+    if (document.readyState === 'complete') openDiag();
+    else window.addEventListener('load', openDiag);
+}
 
 function isIOS() {
     return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
@@ -7034,6 +7121,7 @@ function hideAllInstallUI() {
 window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault(); // stop auto-prompt so we control timing
     deferredPrompt = e;
+    window.__bipFired = true;   // read by the ?diag=1 panel
 
     if (isInStandaloneMode()) return; // already installed
 
