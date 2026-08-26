@@ -7049,8 +7049,10 @@ async function runInstallDiagnostics() {
     add('Manifest valid', manOk, manDetail);
 
     add('Browser offered install', window.__bipFired,
-        window.__bipFired ? 'beforeinstallprompt fired — use the Install button or menu'
-                          : 'never fired. If everything above is green, this is the phone: Chrome menu ⋮ → Add to Home screen still works.');
+        window.__bipFired
+            ? 'ready — tap Install below'
+            : 'not yet. Chrome holds this back until you have used the site for about 30 seconds, so this is normal on a fresh visit. Chrome menu ⋮ → Add to Home screen works right now either way.',
+        !window.__bipFired);
 
     // Notifications
     add('Notification permission', Notification.permission === 'granted', Notification.permission);
@@ -7078,7 +7080,9 @@ async function runInstallDiagnostics() {
         <h3 style="margin-bottom:4px;">🩺 Install &amp; Notification Check</h3>
         <p class="text-muted" style="font-size:0.76rem;margin-bottom:12px;word-break:break-word;">${escAttr(ua)}</p>
         ${html}
-        <button class="btn btn-primary w-full" style="margin-top:16px;" onclick="this.parentElement.parentElement.remove()">Close</button>
+        ${window.__bipFired ? `<button class="btn btn-success w-full" style="margin-top:16px;" onclick="triggerInstallPrompt()">📲 Install app</button>` : ''}
+        <button class="btn btn-secondary w-full" style="margin-top:10px;" onclick="this.parentElement.parentElement.remove(); runInstallDiagnostics();">🔄 Re-check</button>
+        <button class="btn btn-primary w-full" style="margin-top:10px;" onclick="this.parentElement.parentElement.remove()">Close</button>
     </div>`;
     document.body.appendChild(el);
 }
