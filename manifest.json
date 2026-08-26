@@ -22,6 +22,15 @@
       "purpose": "maskable"
     }
   ],
-  "categories": ["business", "food"],
-  "prefer_related_applications": false
+  "categories": [
+    "business",
+    "food"
+  ],
+  "prefer_related_applications": false,
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "https://titir95biplab-dotcom.github.io/JT--POS2/manifest.json"
+    }
+  ]
 }
