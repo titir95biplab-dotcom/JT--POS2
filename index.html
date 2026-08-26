@@ -7059,7 +7059,21 @@ async function runInstallDiagnostics() {
         const m = await res.json();
         const icon = (m.icons || [])[0];
         manOk = !!(m.name && m.start_url && m.display && icon);
-        manDetail = `${m.name} · ${m.display} · icon ${icon ? icon.sizes : 'MISSING'}`;
+        manDetail = `${m.name} · ${m.display} · ${(m.icons || []).length} icon(s)`;
+
+        // Decode each icon for real — declared size means nothing if the file differs.
+        const base = new URL(link.href, location.href);
+        const results = await Promise.all((m.icons || []).map(ic => new Promise(res => {
+            const img = new Image();
+            img.onload = () => res({ src: ic.src, want: ic.sizes, got: img.naturalWidth + 'x' + img.naturalHeight,
+                                     ok: (ic.sizes === img.naturalWidth + 'x' + img.naturalHeight) });
+            img.onerror = () => res({ src: ic.src, want: ic.sizes, got: 'FAILED TO LOAD', ok: false });
+            img.src = new URL(ic.src, base).href;
+        })));
+        const big = results.find(r => r.ok && parseInt(r.got, 10) >= 192);
+        add('Icons load at the declared size', results.every(r => r.ok),
+            results.map(r => `${r.src}: want ${r.want}, got ${r.got}`).join(' · '));
+        add('Has a usable icon ≥192px', !!big, big ? (big.src + ' ' + big.got) : 'none — Chrome will not offer install');
     } catch (e) { manDetail = 'could not load manifest: ' + e.message; }
     add('Manifest valid', manOk, manDetail);
 
@@ -7088,6 +7102,13 @@ async function runInstallDiagnostics() {
             <div><div style="font-weight:600; font-size:0.85rem;">${r.label}</div>
             <div class="text-muted" style="font-size:0.74rem; word-break:break-word;">${escAttr(r.detail)}</div></div>
          </div>`).join('');
+
+    if (!window.__bipWatch) {
+        window.__bipWatch = true;
+        window.addEventListener('beforeinstallprompt', () => {
+            if (typeof showToast === 'function') showToast('✅ Chrome is ready — tap 📲 Install App', 'success');
+        });
+    }
 
     const el = document.createElement('div');
     el.style.cssText = 'position:fixed;inset:0;z-index:100000;background:var(--bg);padding:18px;overflow:auto;';
