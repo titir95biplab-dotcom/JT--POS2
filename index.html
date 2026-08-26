@@ -918,13 +918,14 @@ async function trackUserActivity(phone) {
             </div>
             <div style="flex:1; min-width:130px;">
                 <label class="text-muted" style="font-size:0.75rem;">Minimum order value (₹)</label>
-                <input type="number" id="storeMinOrderValue" class="input" placeholder="e.g. 300" style="margin:0;" min="0">
+                <input type="number" id="storeMinOrderValue" class="input" placeholder="200" style="margin:0;" min="0">
             </div>
         </div>
         <p class="text-muted" style="font-size:0.72rem; margin-top:8px; line-height:1.5;">
             Order ≥ minimum → delivery free. Below it → the charge is added.<br>
-            Leave the charge blank or 0 to switch the feature off. Set the minimum to 0 to
-            charge every delivery order regardless of size. Dine-in is never charged.
+            Leave the charge blank or 0 to switch the feature off. Leave the minimum blank
+            and it defaults to ₹200. Set it to 0 to charge every delivery order regardless
+            of size. Dine-in is never charged.
         </p>
     </div>
 
@@ -4990,10 +4991,18 @@ function filterMenu(text) {
         //
         // Returns { charge, minValue, free, shortBy } so the carts can also show
         // "add ₹x more for free delivery".
+        // Free-delivery threshold used when the store document has none set. An
+        // unset value used to read as 0, which charged EVERY delivery order — the
+        // opposite of a sensible default. An explicit 0 still means "charge
+        // everything", so the setting keeps its full range.
+        const DEFAULT_MIN_ORDER_VALUE = 200;
+
         function deliveryInfoFor(itemsSubtotal, orderType) {
             const s = STATE.storeSettings || {};
             const charge   = Math.max(0, Number(s.deliveryCharge) || 0);
-            const minValue = Math.max(0, Number(s.minOrderValue) || 0);
+            const minValue = (typeof s.minOrderValue === 'number')
+                ? Math.max(0, s.minOrderValue)
+                : DEFAULT_MIN_ORDER_VALUE;
             const sub = Number(itemsSubtotal) || 0;
             if (orderType !== 'delivery' || charge <= 0) {
                 return { charge: 0, minValue, free: false, shortBy: 0, configured: charge > 0 };
