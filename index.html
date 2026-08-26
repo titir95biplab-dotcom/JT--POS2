@@ -7022,9 +7022,24 @@ async function runInstallDiagnostics() {
     add('Real Chrome (not in-app browser)', isRealChrome,
         isRealChrome ? ('Chrome ' + (chrome || '?')) : 'in-app/other browser — install is never offered here');
     add('Chrome recent enough', !chrome || Number(chrome) >= 90, chrome ? ('version ' + chrome) : 'unknown');
-    add('Already installed', isInStandaloneMode(),
-        isInStandaloneMode() ? 'running standalone — that is why install is not offered' : 'running in a browser tab (normal before installing)',
-        true);
+    let installed = null, installedDetail = '';
+    if (navigator.getInstalledRelatedApps) {
+        try {
+            const apps = await navigator.getInstalledRelatedApps();
+            installed = apps.length > 0;
+            installedDetail = installed
+                ? ('ALREADY INSTALLED as ' + (apps[0].id || apps[0].url || 'a home-screen app') +
+                   ' — this is why Chrome offers no install option. Look for the icon in your app drawer.')
+                : 'not installed yet';
+        } catch (e) { installedDetail = 'could not check: ' + e.message; }
+    } else {
+        installedDetail = 'this browser cannot report it';
+    }
+    add('Already installed on this phone', installed === true, installedDetail, installed !== true);
+
+    add('Running as installed app', isInStandaloneMode(),
+        isInStandaloneMode() ? 'yes — opened from the home-screen icon' : 'no — this is a browser tab',
+        !isInStandaloneMode());
 
     // Service worker
     let swOk = false, swDetail = 'not supported';
