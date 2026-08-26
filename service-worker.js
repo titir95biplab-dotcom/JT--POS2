@@ -12,19 +12,45 @@ firebase.initializeApp({
     appId: "1:245807455645:web:3a27d443062a60ae8fe374"
 });
 
+// Where a tapped notification should open this outlet's app.
+const APP_URL = "https://titir95biplab-dotcom.github.io/JT--POS2/";
+
 // 2. Initialize Messaging
 const messaging = firebase.messaging();
 
 // 3. Background Message Handler
 messaging.onBackgroundMessage((payload) => {
   console.log('Received background message ', payload);
-  const notificationTitle = payload.notification.title;
+  const n = payload.notification || {};
+  const notificationTitle = n.title;
   const notificationOptions = {
-    body: payload.notification.body,
+    body: n.body,
     icon: '/logo.png',
-    image: payload.notification.image || null
+    badge: '/logo.png',
+    image: n.image || undefined,
+    // Same tag => a new broadcast replaces the previous one instead of stacking.
+    tag: 'jt-broadcast',
+    renotify: true,
+    // Where a tap should take the customer. fcmOptions.link from the Cloud
+    // Function lands here; APP_URL is the fallback.
+    data: { url: (payload.fcmOptions && payload.fcmOptions.link) || APP_URL }
   };
   self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+// Without this, tapping the notification does nothing. Focus an open tab if
+// there is one, otherwise open the app.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || APP_URL;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const client of list) {
+        if (client.url.indexOf(APP_URL) === 0 && 'focus' in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
+    })
+  );
 });
 
 
@@ -34,7 +60,7 @@ messaging.onBackgroundMessage((payload) => {
 // single URL 404s, which silently kills offline caching. ('./kot.html' used to be
 // listed here and does not exist — the KOT app is a separate Firebase Hosting
 // deployment under 'kot app/'.)
-const CACHE_NAME = 'jt-majherhati-pos-v18';
+const CACHE_NAME = 'jt-majherhati-pos-v19';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
