@@ -721,6 +721,8 @@ async function trackUserActivity(phone) {
     <button class="btn btn-sm btn-secondary" onclick="setDashboardRange('today')">Today</button>
     <button class="btn btn-sm btn-secondary" onclick="setDashboardRange('yesterday')">Yesterday</button>
     <button class="btn btn-sm btn-secondary" onclick="setDashboardRange('last7')">Last 7 Days</button>
+    <button class="btn btn-sm btn-secondary" onclick="setDashboardRange('last30')">Last 30 Days</button>
+    <button class="btn btn-sm btn-secondary" onclick="setDashboardRange('thismonth')">This Month</button>
 </div>
         <div class="flex gap-2" style="margin: 15px 0; align-items: flex-end;">
             <div>
@@ -767,6 +769,21 @@ async function trackUserActivity(phone) {
                 <div class="stat-label">Online Collected</div>
                 <div class="stat-value" id="statOnline">₹0</div>
             </div>
+<div class="stat-card" style="border-color: var(--warning);">
+    <div class="stat-label">🚚 Delivery Orders</div>
+    <div class="stat-value" id="statDeliveryCount">0</div>
+    <div class="text-muted" style="font-size:0.72rem;" id="statDeliveryShare">&mdash;</div>
+</div>
+<div class="stat-card" style="border-color: var(--warning);">
+    <div class="stat-label">🚚 Delivery Sales</div>
+    <div class="stat-value" id="statDeliverySales">₹0</div>
+    <div class="text-muted" style="font-size:0.72rem;" id="statDeliveryAvg">&mdash;</div>
+</div>
+<div class="stat-card" style="border-color: var(--warning);">
+    <div class="stat-label">🚚 Delivery Charges</div>
+    <div class="stat-value" id="statDeliveryCharges">₹0</div>
+    <div class="text-muted" style="font-size:0.72rem;">collected in range</div>
+</div>
 <div class="stat-card" style="border-color: #9C27B0;">
     <div class="stat-label">Active Users (7 Days)</div>
     <div class="stat-value" id="statActiveUsers">0</div>
@@ -840,6 +857,14 @@ async function trackUserActivity(phone) {
                 <label class="text-muted" style="font-size: 0.8rem;">End Date (optional)</label>
                 <input type="date" id="historyEnd" class="input">
             </div>
+        </div>
+        <div style="margin-bottom:10px;">
+            <label class="text-muted" style="font-size: 0.8rem;">Order type</label>
+            <select id="historyTypeFilter" class="input" onchange="renderAdminHistory()">
+                <option value="all">All orders</option>
+                <option value="delivery">🚚 Delivery only</option>
+                <option value="dine-in">🍽️ Dine-in only</option>
+            </select>
         </div>
         <button class="btn btn-primary w-full" onclick="searchHistory()">🔍 Search History</button>
     </div>
@@ -3893,6 +3918,13 @@ function setDashboardRange(type) {
         // Start = 7 days ago, End = Today
         startDate.setDate(startDate.getDate() - 7);
     }
+    else if (type === 'last30') {
+        startDate.setDate(startDate.getDate() - 30);
+    }
+    else if (type === 'thismonth') {
+        // 1st of the current month through today
+        startDate.setDate(1);
+    }
 
     // Update Input Fields
     document.getElementById('dashStart').valueAsDate = startDate;
@@ -3935,6 +3967,8 @@ const startInput = document.getElementById('dashStart').value;
         let cashTotal = 0;
         let onlineTotal = 0;
         let itemMap = {}; // Format: { "Mango Shake": { qty: 5, revenue: 500 } }
+        // Delivery breakdown for the selected range
+        let deliveryCount = 0, deliverySales = 0, deliveryChargeTotal = 0;
 
         // --- Variables for Last 30 Days Graph ---
         let dailySales = {}; // Format: { "2023-10-01": 5000, "2023-10-02": 3200 }
@@ -3968,6 +4002,12 @@ const startInput = document.getElementById('dashStart').value;
                 count++;
                 bonusRedeemed += (data.redeemed || 0);
 
+                if (data.orderType === 'delivery') {
+                    deliveryCount++;
+                    deliverySales += finalAmt;
+                    deliveryChargeTotal += (Number(data.deliveryCharge) || 0);
+                }
+
                 // Payment Mode Split - Handle Partial Payments
                 if (data.paymentMode === 'Partial') {
                     // For partial payments, use the split amounts
@@ -4000,6 +4040,13 @@ const startInput = document.getElementById('dashStart').value;
         document.getElementById('statBonus').innerText = '₹' + bonusRedeemed;
         document.getElementById('statCash').innerText = '₹' + cashTotal;
         document.getElementById('statOnline').innerText = '₹' + onlineTotal;
+        document.getElementById('statDeliveryCount').innerText = deliveryCount;
+        document.getElementById('statDeliverySales').innerText = '₹' + deliverySales;
+        document.getElementById('statDeliveryCharges').innerText = '₹' + deliveryChargeTotal;
+        document.getElementById('statDeliveryShare').innerText =
+            count ? Math.round((deliveryCount / count) * 100) + '% of orders' : '—';
+        document.getElementById('statDeliveryAvg').innerText =
+            deliveryCount ? 'avg ₹' + Math.floor(deliverySales / deliveryCount) : '—';
 
         // 5. Update Top Items List & Detailed Table
         renderItemAnalytics(itemMap);
@@ -5538,10 +5585,47 @@ async function searchHistory() {
             return;
         }
 
-        const orders = snap.docs.map(d => ({id: d.id, ...d.data()}));
+        ADMIN_HISTORY_ORDERS = snap.docs.map(d => ({id: d.id, ...d.data()}));
+        renderAdminHistory();
 
-        // Render Results (Reusing your card design)
-        list.innerHTML = orders.map(o => {
+    } catch (e) {
+        console.error(e);
+        list.innerHTML = `<p class="text-danger text-center">Error: ${e.message}</p>`;
+        // Note: The first time you run this, check the console for the index link!
+    }
+}
+
+// Whatever searchHistory() last fetched, re-rendered through the type filter.
+// Kept separate so switching Delivery / Dine-in costs nothing — no second query.
+let ADMIN_HISTORY_ORDERS = [];
+
+function renderAdminHistory() {
+    const list = document.getElementById('adminOrdersList');
+    if (!list) return;
+    const mode = (document.getElementById('historyTypeFilter') || {}).value || 'all';
+    const all = ADMIN_HISTORY_ORDERS || [];
+    const isDelivery = (o) => o.orderType === 'delivery';
+    let orders = all;
+    if (mode === 'delivery') orders = all.filter(isDelivery);
+    else if (mode === 'dine-in') orders = all.filter(o => !isDelivery(o));
+
+    // Running summary, so the delivery share of the range is readable at a glance
+    const delAll = all.filter(isDelivery);
+    const amt = (arr) => arr.reduce((t, o) => t + ((o.finalPaid !== undefined ? o.finalPaid : o.total) || 0), 0);
+    const charges = delAll.reduce((t, o) => t + (Number(o.deliveryCharge) || 0), 0);
+    const summary = `
+        <div class="text-muted" style="font-size:0.8rem; margin-bottom:10px; line-height:1.6;">
+            Showing <b>${orders.length}</b> of ${all.length} order${all.length !== 1 ? 's' : ''}
+            &nbsp;·&nbsp; 🚚 <b>${delAll.length}</b> delivery worth <b>₹${amt(delAll)}</b>${charges > 0 ? ` (₹${charges} in delivery charges)` : ''}
+            &nbsp;·&nbsp; 🍽️ ${all.length - delAll.length} dine-in worth ₹${amt(all.filter(o => !isDelivery(o)))}
+        </div>`;
+
+    if (!orders.length) {
+        list.innerHTML = summary + '<p class="text-muted text-center" style="padding:20px;">No orders match this filter.</p>';
+        return;
+    }
+
+    list.innerHTML = summary + orders.map(o => {
             const dateStr = o.timestamp ? new Date(o.timestamp.toDate()).toLocaleDateString() + ' ' + new Date(o.timestamp.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'N/A';
             
             // Determine status color
@@ -5556,6 +5640,11 @@ async function searchHistory() {
 
             // Source
             const srcLabel = o.orderSource === 'customer' ? '📱' : '🖥️';
+
+            // Order type, readable without opening the bill
+            const typeBadge = o.orderType === 'delivery'
+                ? `<span style="background:var(--warning); color:#000; padding:1px 7px; border-radius:3px; font-size:0.65rem; font-weight:800; margin-left:6px;">🚚 DELIVERY</span>`
+                : `<span style="background:rgba(128,128,128,0.22); color:var(--text-muted); padding:1px 7px; border-radius:3px; font-size:0.65rem; font-weight:700; margin-left:6px;">🍽️ DINE-IN</span>`;
 
             // Bill send buttons + "sent" indicators (completed orders only)
             const waBadge = `<span id="billsent-${o.id}-whatsapp" style="background:#25D366; color:#000; padding:2px 7px; border-radius:3px; font-size:0.65rem; font-weight:bold; ${o.billSentWA ? '' : 'display:none;'}">✅ WA Sent</span>`;
@@ -5572,7 +5661,7 @@ async function searchHistory() {
             <div class="order-card" onclick="viewOrderDetails('${o.id}')" style="cursor:pointer;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div>
-                        <div style="font-weight:bold; font-size:1.1rem;">${srcLabel} ${o.customerName || o.phone}</div>
+                        <div style="font-weight:bold; font-size:1.1rem;">${srcLabel} ${o.customerName || o.phone}${typeBadge}</div>
                         <div class="text-muted" style="font-size:0.85rem;">${dateStr} • <span style="color:${statusColor}">${o.status.toUpperCase()}</span>${kotBadge}</div>
                         <div class="text-muted" style="font-size:0.8rem;">₹${o.total} • ${o.paymentMode || 'Cash'}</div>
                         ${prepSummaryLine(o)}
@@ -5585,12 +5674,6 @@ async function searchHistory() {
                 ${sendRow}
             </div>
         `;}).join('');
-
-    } catch (e) {
-        console.error(e);
-        list.innerHTML = `<p class="text-danger text-center">Error: ${e.message}</p>`;
-        // Note: The first time you run this, check the console for the index link!
-    }
 }
 
         function renderIncoming(orders) {
