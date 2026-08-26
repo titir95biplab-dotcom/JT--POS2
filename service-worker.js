@@ -34,7 +34,7 @@ messaging.onBackgroundMessage((payload) => {
 // single URL 404s, which silently kills offline caching. ('./kot.html' used to be
 // listed here and does not exist — the KOT app is a separate Firebase Hosting
 // deployment under 'kot app/'.)
-const CACHE_NAME = 'jt-majherhati-pos-v17';
+const CACHE_NAME = 'jt-majherhati-pos-v18';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
