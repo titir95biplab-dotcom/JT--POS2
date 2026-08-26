@@ -1,21 +1,27 @@
 {
   "name": "Juice Therapy Majherhati POS",
   "short_name": "JT Majherhati",
+  "description": "Smart POS System for Juice Therapy Majherhati",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#070D1A",
   "theme_color": "#070D1A",
+  "orientation": "portrait-primary",
   "icons": [
     {
       "src": "logo.png",
-      "sizes": "192x192",
-      "type": "image/png"
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "logo.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
-  "orientation": "portrait-primary"
+  "categories": ["business", "food"],
+  "prefer_related_applications": false
 }
