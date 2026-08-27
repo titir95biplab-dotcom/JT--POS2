@@ -7148,49 +7148,6 @@ function hideIOSInstallModal() {
     document.getElementById('iosInstallModal').classList.add('hidden');
 }
 
-// Shown when the browser has not offered a one-tap install. Chrome for Android
-// can always install from its own menu, so point at that.
-function showManualInstallModal() {
-    if (document.getElementById('manualInstallModal')) return;
-    const isChromeAndroid = /Android/i.test(navigator.userAgent) && /Chrome\//.test(navigator.userAgent)
-                            && !/(EdgA|OPR|SamsungBrowser|MiuiBrowser|wv)/.test(navigator.userAgent);
-    const steps = isChromeAndroid ? [
-        'Tap the <strong>⋮</strong> menu at the top-right of Chrome',
-        'Choose <strong>“Add to Home screen”</strong> (it may sit under <strong>Save and share</strong>)',
-        'Tap <strong>Install</strong> — the app icon appears on your home screen'
-    ] : [
-        'Open this page in <strong>Chrome</strong> (not inside another app’s browser)',
-        'Tap the browser <strong>menu</strong>',
-        'Choose <strong>“Add to Home screen”</strong> or <strong>“Install app”</strong>'
-    ];
-
-    const el = document.createElement('div');
-    el.id = 'manualInstallModal';
-    el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:99999;display:flex;align-items:flex-end;justify-content:center;padding:12px;';
-    el.innerHTML = `
-        <div style="background:var(--surface);border-radius:20px 20px 16px 16px;padding:20px;width:100%;max-width:440px;border:1px solid var(--primary);">
-            <div style="text-align:center;margin-bottom:4px;">
-                <div style="display:inline-block;background:var(--primary);color:#000;font-size:0.7rem;font-weight:800;padding:3px 12px;border-radius:20px;letter-spacing:1px;">INSTALL THIS APP</div>
-            </div>
-            <div style="text-align:center;font-size:2.2rem;margin:8px 0 4px;">📲</div>
-            <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px;">
-                ${steps.map((t, i) => `
-                <div style="display:flex;align-items:center;gap:12px;background:rgba(128,128,128,0.10);padding:11px 14px;border-radius:12px;">
-                    <span style="background:var(--primary);color:#000;font-weight:800;font-size:0.8rem;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${i + 1}</span>
-                    <span style="font-size:0.9rem;color:var(--text);">${t}</span>
-                </div>`).join('')}
-            </div>
-            <p class="text-muted" style="font-size:0.72rem;margin-bottom:12px;line-height:1.5;">
-                Chrome only offers one-tap install after you have used the app for about
-                half a minute. Keep using it and a <strong>📲 Install App</strong> button will
-                appear here on its own.
-            </p>
-            <button class="btn btn-primary w-full" onclick="document.getElementById('manualInstallModal').remove()">Got it ✓</button>
-        </div>`;
-    el.addEventListener('click', (e) => { if (e.target === el) el.remove(); });
-    document.body.appendChild(el);
-}
-
 function hideAllInstallUI() {
     ['pwaInstallBtn','iosInstallBtn'].forEach(id => {
         const el = document.getElementById(id);
@@ -7220,9 +7177,7 @@ window.addEventListener('beforeinstallprompt', (e) => {
 });
 
 async function triggerInstallPrompt() {
-    // Chrome only hands us the prompt once the site has enough engagement. Until
-    // then, show the manual route rather than doing nothing at all.
-    if (!deferredPrompt) return showManualInstallModal();
+    if (!deferredPrompt) return;
     const btn = document.getElementById('pwaInstallBtn');
     try {
         deferredPrompt.prompt();
@@ -7239,20 +7194,15 @@ async function triggerInstallPrompt() {
 // Button click — for users who dismissed the auto-prompt
 const pwaBtn = document.getElementById('pwaInstallBtn');
 if (pwaBtn) {
-    pwaBtn.onclick = () => triggerInstallPrompt();   // falls back to the guide itself
+    pwaBtn.onclick = () => {
+        if (deferredPrompt) {
+            triggerInstallPrompt();
+        } else {
+            // Prompt already used — guide them to browser menu
+            showToast('Tap browser menu ⋮ → "Add to Home Screen"');
+        }
+    };
 }
-
-// ── Install UI on every visit ──
-// The Android button no longer waits for beforeinstallprompt; without this there
-// was no way to install at all until Chrome decided to offer it.
-function showInstallUIIfNeeded() {
-    if (isInStandaloneMode()) { hideAllInstallUI(); return; }
-    if (isIOS()) return;                      // iOS has its own button below
-    const btn = document.getElementById('pwaInstallBtn');
-    if (btn) btn.classList.remove('hidden');
-}
-if (document.readyState === 'complete') showInstallUIIfNeeded();
-else window.addEventListener('load', showInstallUIIfNeeded);
 
 // ── iOS / iPadOS: show tap-to-install guide ──
 window.addEventListener('load', () => {
