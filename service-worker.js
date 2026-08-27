@@ -60,7 +60,7 @@ self.addEventListener('notificationclick', (event) => {
 // single URL 404s, which silently kills offline caching. ('./kot.html' used to be
 // listed here and does not exist — the KOT app is a separate Firebase Hosting
 // deployment under 'kot app/'.)
-const CACHE_NAME = 'jt-majherhati-pos-v26';
+const CACHE_NAME = 'jt-majherhati-pos-v27';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
