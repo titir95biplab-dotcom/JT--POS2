@@ -1280,6 +1280,18 @@ async function trackUserActivity(phone) {
                             <button id="custTypeDineIn" class="btn btn-sm w-full btn-primary" onclick="setCustOrderType('dine-in')">🍽️ Dine-in</button>
                             <button id="custTypeDelivery" class="btn btn-sm w-full btn-secondary" onclick="setCustOrderType('delivery')">🚚 Delivery</button>
                         </div>
+                        <div id="custBonusBox" class="hidden" style="background:rgba(0,229,160,0.08); border:1px solid rgba(0,229,160,0.35); border-radius:8px; padding:8px 10px; margin:8px 0;">
+                            <div class="flex justify-between" style="font-size:0.78rem; font-weight:600; margin-bottom:6px;">
+                                <span>🎁 Use my bonus points</span>
+                                <span id="custBonusAvail" class="text-muted" style="font-weight:normal;">0 pts</span>
+                            </div>
+                            <div class="flex gap-2">
+                                <input type="number" id="custRedeemInput" class="input" min="0" placeholder="0"
+                                       style="padding:6px 8px; font-size:0.85rem;" oninput="onCustRedeemChange()">
+                                <button class="btn btn-secondary btn-sm" onclick="useMaxCustPoints()">Max</button>
+                            </div>
+                            <div class="text-muted" style="font-size:0.68rem; margin-top:5px;">1 point = ₹1. Deducted when the outlet bills your order.</div>
+                        </div>
                         <div class="cart-items" id="custCartItems"></div>
                         <div style="border-top: 1px solid rgba(0,212,255,0.15); padding-top: 10px;">
                             <div class="flex justify-between font-bold" style="font-size: 1.2rem; margin-bottom: 10px;">
@@ -1444,6 +1456,8 @@ async function trackUserActivity(phone) {
             kitchenLockedItems: [], // items locked by kitchen (cannot reduce/remove)
             orderType: 'dine-in', // 'dine-in' | 'delivery' — set when taking an order
             custOrderType: 'dine-in', // customer panel order type
+            custRedeem: 0,        // bonus points the customer asked to spend (dine-in only)
+            custAvailPoints: 0,   // customer's live, non-expired point balance
             custEditingOrderId: null, // id of the customer's own 'requested' order being edited
             staffRoster: [],      // operational staff names (managed from admin panel)
             activeStaff: '',      // currently selected staff handling the outlet POS
@@ -1603,6 +1617,70 @@ function updateCustOrderTypeButtons() {
     v.className = 'btn btn-sm w-full ' + (isDelivery ? 'btn-primary' : 'btn-secondary');
 }
 
+// ── Customer self-redemption (dine-in only) ────────────────────
+// The customer only REQUESTS a redemption here. The points are actually
+// consumed inside the payment transaction at the counter, which re-reads the
+// live balance — so a phone left open on a stale screen can never overspend.
+// Delivery orders never redeem, matching the rule the counter already enforces.
+function custRedeemCap() {
+    const sub = (STATE.custCart || []).reduce((s, i) => s + (i.price * i.qty), 0);
+    return Math.max(0, Math.min(STATE.custAvailPoints || 0, sub));
+}
+function onCustRedeemChange() {
+    const el = document.getElementById('custRedeemInput');
+    if (!el) return;
+    let v = parseInt(el.value) || 0;
+    const cap = custRedeemCap();
+    if (v > cap) v = cap;
+    if (v < 0) v = 0;
+    el.value = v > 0 ? v : '';
+    STATE.custRedeem = v;
+    if (typeof renderActiveCart === 'function') renderActiveCart();
+}
+function useMaxCustPoints() {
+    const el = document.getElementById('custRedeemInput');
+    if (!el) return;
+    el.value = custRedeemCap() || '';
+    onCustRedeemChange();
+}
+// Keeps the box in step with the cart: hidden on delivery or with no points,
+// and the requested amount clamped if the cart shrank below it.
+function updateCustBonusUI() {
+    const box = document.getElementById('custBonusBox');
+    if (!box) return;
+    const isDelivery = STATE.custOrderType === 'delivery';
+    const avail = STATE.custAvailPoints || 0;
+    box.classList.toggle('hidden', isDelivery || avail <= 0 || (STATE.custCart || []).length === 0);
+    const availEl = document.getElementById('custBonusAvail');
+    if (availEl) availEl.innerText = avail + ' pts';
+    const input = document.getElementById('custRedeemInput');
+    if (isDelivery) {
+        STATE.custRedeem = 0;
+        if (input) input.value = '';
+        return;
+    }
+    const cap = custRedeemCap();
+    if ((STATE.custRedeem || 0) > cap) {
+        STATE.custRedeem = cap;
+        if (input) input.value = cap > 0 ? cap : '';
+    }
+}
+// The balance moves every time an order is billed, so the cap is re-read from
+// Firestore rather than trusted from login time.
+async function refreshCustomerPoints() {
+    if (!STATE.user || !STATE.user.phone) return;
+    try {
+        const { doc, getDoc } = window.firebaseModules;
+        const snap = await getDoc(doc(window.db, 'customers', STATE.user.phone));
+        if (!snap.exists()) return;
+        const { available } = reconcilePointLots(snap.data());
+        STATE.custAvailPoints = available;
+        const el = document.getElementById('custPoints');
+        if (el) el.innerText = available;
+        updateCustBonusUI();
+    } catch (e) { console.error('Point refresh failed:', e); }
+}
+
 // Resolve the QR image URL (Settings override, else QR.jpg sitting next to the app)
 function getPaymentQrUrl() {
     const fromSettings = STATE.storeSettings && STATE.storeSettings.qrUrl;
@@ -1703,6 +1781,37 @@ function fmtDuration(ms) {
 function fmtClock(ms) {
     if (ms == null) return '—';
     return new Date(ms).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+}
+
+// What the kitchen actually has to make. Used to tell whether an edit changed
+// the food — a phone number or coupon change must not send an order back to
+// the kitchen.
+function kitchenItemSignature(items) {
+    return (items || [])
+        .map(i => `${i.id}:${i.qty}:${i.parcelQty || 0}`)
+        .sort()
+        .join('|');
+}
+
+// The kitchen board filters by kotStatus, so an order it has marked ready sits
+// in the DONE tab where nobody will look at it again. When items are added to
+// an already-ready order it has to go back on the active board, or the new item
+// is billed but never made.
+async function reopenKitchenTicket(orderId) {
+    try {
+        const { doc, updateDoc, serverTimestamp } = window.firebaseModules;
+        await updateDoc(doc(window.db, 'orders', orderId), {
+            kotStatus: 'preparing',
+            // Cleared so the next "Mark Ready" times the WHOLE order, added items
+            // included, instead of keeping the earlier partial finish time.
+            kotCompletedAt: null,
+            kotReopenedAt: serverTimestamp()
+        });
+        showToast('🔥 Sent back to the kitchen — the added items still need making');
+    } catch (e) {
+        console.error('Kitchen reopen failed:', e);
+        showToast('⚠️ Saved, but the kitchen board was not updated — tell the kitchen directly', 'error');
+    }
 }
 
 // Compute wait / prep / total durations for an order from its lifecycle timestamps.
@@ -3276,6 +3385,7 @@ async function restoreCustomerSession(phone) {
             // Show only non-expired points; lazily persist if some have expired since last sync.
             const { lots, available } = reconcilePointLots(data);
             document.getElementById('custPoints').innerText = available;
+            STATE.custAvailPoints = available;
             if (available < (data.points || 0)) {
                 const { doc, updateDoc } = window.firebaseModules;
                 updateDoc(doc(window.db, 'customers', phone), {
@@ -4394,7 +4504,17 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             // Source badge
             const srcLabel = data.orderSource === 'customer' ? '📱 Customer App Order' : '🖥️ POS / Outlet Order';
             const srcHtml = `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">${srcLabel}</div>`;
-            const typeHtml = `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">${orderTypeLabel(data.orderType)} Order</div>`;
+            // Type can still be changed while the order is unbilled; once it is
+            // completed the money has moved and the type is frozen.
+            const modalNextType = data.orderType === 'delivery' ? 'dine-in' : 'delivery';
+            const canSwitchType = (data.status !== 'completed' && data.status !== 'cancelled');
+            const switchTypeHtml = canSwitchType
+                ? `<button class="btn btn-warning btn-sm" style="margin-top:6px; font-size:0.75rem;" onclick="switchOrderTypeFromModal('${modalNextType}', '${data.orderType || 'dine-in'}')">🔄 Switch to ${modalNextType === 'delivery' ? '🚚 Delivery' : '🍽️ Dine-in'}</button>`
+                : '';
+            const reqRedeemHtml = (data.requestedRedeem > 0 && data.status !== 'completed')
+                ? `<div style="font-size:0.8rem; color:var(--success); margin-top:2px;">🎁 Customer requested ${data.requestedRedeem} bonus points</div>`
+                : '';
+            const typeHtml = `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">${orderTypeLabel(data.orderType)} Order</div>${reqRedeemHtml}${switchTypeHtml}`;
             let staffHtml = '';
             if (data.staffName || data.billedBy) {
                 const parts = [];
@@ -4435,17 +4555,18 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
                     const orderData = snap.data();
                     const kotSt = orderData.kotStatus;
 
-                    if(kotSt === 'completed') {
-                        // Kitchen fully done — no editing at all
-                        return showToast('❌ Cannot edit — Kitchen has already completed this order', 'error');
-                    }
-
-                    if(kotSt === 'preparing') {
-                        // Add-only mode: store original items as locked floor
+                    // Same rule as the outlet POS: the kitchen locks lines, it does
+                    // not lock the order. New items can always be added.
+                    if(kotSt === 'preparing' || kotSt === 'completed') {
+                        // Add-only mode: store original items as the locked floor
                         ADMIN_KITCHEN_LOCKED_ITEMS = JSON.parse(JSON.stringify(orderData.items));
-                        showToast('⚠️ Kitchen is preparing — you can only ADD items or increase qty', 'warning');
+                        ADMIN_KITCHEN_LOCK_REASON = kotSt;
+                        showToast(kotSt === 'completed'
+                            ? '✅ Kitchen finished this order — you can only ADD items or increase qty'
+                            : '⚠️ Kitchen is preparing — you can only ADD items or increase qty', 'warning');
                     } else {
                         ADMIN_KITCHEN_LOCKED_ITEMS = [];
+                        ADMIN_KITCHEN_LOCK_REASON = null;
                     }
                 }
                 _doEnableAdminEdit();
@@ -4471,7 +4592,9 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
         const banner = document.createElement('div');
         banner.id = 'kitchenLockBanner';
         banner.style.cssText = 'background:rgba(255,149,0,0.15); border:1px solid rgba(255,149,0,0.4); border-radius:8px; padding:8px 12px; margin-bottom:10px; font-size:0.82rem; color:#FF9500; font-weight:600;';
-        banner.innerHTML = '🔥 Kitchen is preparing — existing items are locked. You can only <strong>add new items</strong> or <strong>increase quantities</strong>.';
+        banner.innerHTML = (ADMIN_KITCHEN_LOCK_REASON === 'completed'
+            ? '✅ Kitchen has finished this order — existing items are locked. You can only <strong>add new items</strong> or <strong>increase quantities</strong>. Added items go back to the kitchen.'
+            : '🔥 Kitchen is preparing — existing items are locked. You can only <strong>add new items</strong> or <strong>increase quantities</strong>.');
         wrapper.prepend(banner);
     }
     
@@ -4500,6 +4623,7 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             document.getElementById('editTotal').disabled = true;
             document.getElementById('editMode').disabled = true;
             ADMIN_KITCHEN_LOCKED_ITEMS = []; // clear lock state
+            ADMIN_KITCHEN_LOCK_REASON = null;
             
 // NEW: Toggle Item Views Back
     document.getElementById('viewItemsList').classList.remove('hidden');
@@ -4530,6 +4654,7 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
         let oldStockModel = 'reserved-v2';
         let oldBlocked = false;
         let oldFinalized = false;
+        let oldKotStatus = null;
         
         // 2. Run a Transaction (Ensures points & order update together)
         await runTransaction(window.db, async (transaction) => {
@@ -4548,6 +4673,7 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             oldStockModel = oldOrderData.stockModel || 'legacy-block-deducted';
             oldBlocked = !!oldOrderData.stockBlocked;
             oldFinalized = !!oldOrderData.stockFinalized;
+            oldKotStatus = oldOrderData.kotStatus || null;
 
             // B. Calculate Point Adjustments (Only if order is completed)
             let newBonus = 0;
@@ -4635,7 +4761,14 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
             stockFinalized: newFinalized
         });
         // --- INVENTORY FIX FOR ADMIN EDIT END ---
-        
+
+        // Items added to an order the kitchen already finished have to go back on
+        // the kitchen board, or they are billed but never made.
+        if (oldKotStatus === 'completed' &&
+            kitchenItemSignature(oldItems) !== kitchenItemSignature(newItems)) {
+            await reopenKitchenTicket(CURRENT_VIEW_ORDER_ID);
+        }
+
         // 3. Success UI Updates
         showToast('Order & Points Updated Successfully');
         disableAdminEdit();
@@ -4654,6 +4787,7 @@ itemSelect.innerHTML = `<option value="">+ Add Menu Item</option>` +
 // 1. Render the editable list with Qty inputs and Delete buttons
 // Stores original (kitchen-locked) items when admin opens a preparing order
 let ADMIN_KITCHEN_LOCKED_ITEMS = [];
+let ADMIN_KITCHEN_LOCK_REASON = null;   // 'preparing' | 'completed' — wording only
 
 function renderEditItems() {
     const container = document.getElementById('editItemsList');
@@ -4669,7 +4803,7 @@ function renderEditItems() {
 
         // Delete button: hidden for locked items
         const deleteBtn = isLocked
-            ? `<button class="btn btn-danger btn-sm" disabled style="opacity:0.25; cursor:not-allowed;" title="Cannot remove — kitchen is preparing">🗑️</button>`
+            ? `<button class="btn btn-danger btn-sm" disabled style="opacity:0.25; cursor:not-allowed;" title="Cannot remove — the kitchen has already taken this item">🗑️</button>`
             : `<button class="btn btn-danger btn-sm" onclick="adminRemoveItem(${index})">🗑️</button>`;
 
         return `
@@ -4709,7 +4843,7 @@ function adminRemoveItem(index) {
     const item = TEMP_EDIT_ITEMS[index];
     const locked = ADMIN_KITCHEN_LOCKED_ITEMS.find(l => l.id === item.id);
     if (locked) {
-        return showToast('🔒 Cannot remove — kitchen is preparing this item', 'error');
+        return showToast('🔒 Cannot remove — the kitchen has already taken this item', 'error');
     }
     TEMP_EDIT_ITEMS.splice(index, 1);
     renderEditItems();
@@ -5010,7 +5144,7 @@ function filterMenu(text) {
                 if(locked) {
                     // Cannot go below the locked (original) quantity
                     if(item.qty <= locked.qty) {
-                        return showToast('🔒 Cannot reduce — Kitchen is already preparing this item', 'error');
+                        return showToast('🔒 Cannot reduce — the kitchen has already taken this item', 'error');
                     }
                 }
             }
@@ -5111,7 +5245,7 @@ function filterMenu(text) {
 
                 // Minus button: disabled if at or below locked qty
                 const minusBtn = isAtLockFloor
-                    ? `<div class="qty-btn" style="opacity:0.3; cursor:not-allowed;" title="🔒 Kitchen is preparing this item">-</div>`
+                    ? `<div class="qty-btn" style="opacity:0.3; cursor:not-allowed;" title="🔒 The kitchen has already taken this item">-</div>`
                     : `<div class="qty-btn" onclick="updateQty('${item.id}', -1)">-</div>`;
 
                 // Lock badge next to name
@@ -5189,8 +5323,20 @@ function filterMenu(text) {
                 deliveryLine = `<div style="font-size:0.72rem; color:var(--success); font-weight:600;">✓ Free delivery</div>`;
             }
 
-            if (strikeLine || deliveryLine) {
-                totalEl.innerHTML = strikeLine + deliveryLine + `<div style="color:var(--success);">₹${finalTotal}</div>`;
+            // The customer's requested bonus, shown as a deduction so the cart
+            // total matches what they will actually be asked to pay.
+            let bonusLine = '';
+            if (STATE.role === 'customer') {
+                updateCustBonusUI();
+                const r = Math.min(STATE.custRedeem || 0, finalTotal);
+                if (r > 0) {
+                    finalTotal -= r;
+                    bonusLine = `<div style="font-size:0.75rem; color:var(--success); font-weight:600;">− ₹${r} bonus points</div>`;
+                }
+            }
+
+            if (strikeLine || deliveryLine || bonusLine) {
+                totalEl.innerHTML = strikeLine + deliveryLine + bonusLine + `<div style="color:var(--success);">₹${finalTotal}</div>`;
             } else {
                 totalEl.innerText = '₹' + total;
             }
@@ -5227,8 +5373,12 @@ function filterMenu(text) {
             const totalForMsg = itemsSubForMsg + deliveryChargeFor(itemsSubForMsg, orderType);
             const custName = (STATE.user && STATE.user.name) || document.getElementById('custNameDisplay')?.innerText || '';
             try {
-                await submitOrder(STATE.user.phone, STATE.custCart, 'requested', 'customer', orderType);
+                const redeemReq = (orderType === 'delivery') ? 0 : Math.min(STATE.custRedeem || 0, custRedeemCap());
+                await submitOrder(STATE.user.phone, STATE.custCart, 'requested', 'customer', orderType, '', redeemReq);
                 STATE.custCart = [];
+                STATE.custRedeem = 0;
+                const _ri = document.getElementById('custRedeemInput');
+                if (_ri) _ri.value = '';
                 STATE.custOrderType = 'dine-in';
                 updateCustOrderTypeButtons();
                 renderActiveCart();
@@ -5265,6 +5415,9 @@ function filterMenu(text) {
                 STATE.custCart = (data.items || []).map(it => ({ ...it, parcelQty: it.parcelQty || 0 }));
                 STATE.custEditingOrderId = orderId;
                 STATE.custOrderType = data.orderType || 'dine-in';
+                STATE.custRedeem = Math.max(0, parseInt(data.requestedRedeem) || 0);
+                const _re = document.getElementById('custRedeemInput');
+                if (_re) _re.value = STATE.custRedeem > 0 ? STATE.custRedeem : '';
                 updateCustOrderTypeButtons();
                 updateCustEditUI();
                 switchCustTab('menu');
@@ -5275,6 +5428,9 @@ function filterMenu(text) {
         function cancelCustEdit() {
             STATE.custEditingOrderId = null;
             STATE.custCart = [];
+            STATE.custRedeem = 0;
+            const _rx = document.getElementById('custRedeemInput');
+            if (_rx) _rx.value = '';
             STATE.custOrderType = 'dine-in';
             updateCustOrderTypeButtons();
             updateCustEditUI();
@@ -5309,12 +5465,16 @@ function filterMenu(text) {
                     wasBlocked = !!data.stockBlocked;
                     // Order type can change during the edit, so the charge is re-decided.
                     const custEditDelivery = deliveryChargeFor(total, orderType);
+                    const custEditRedeem = (orderType === 'delivery')
+                        ? 0
+                        : Math.max(0, Math.min(STATE.custRedeem || 0, STATE.custAvailPoints || 0, total));
                     t.update(orderRef, {
                         items: itemsSnapshot,
                         subtotal: total,
                         deliveryCharge: custEditDelivery,
                         total: total + custEditDelivery,
                         orderType: orderType,
+                        requestedRedeem: custEditRedeem,
                         stockBlocked: true,
                         stockModel: 'reserved-v2'
                     });
@@ -5325,6 +5485,9 @@ function filterMenu(text) {
 
                 STATE.custEditingOrderId = null;
                 STATE.custCart = [];
+                STATE.custRedeem = 0;
+                const _rc = document.getElementById('custRedeemInput');
+                if (_rc) _rc.value = '';
                 STATE.custOrderType = 'dine-in';
                 updateCustOrderTypeButtons();
                 updateCustEditUI();
@@ -5339,7 +5502,7 @@ function filterMenu(text) {
             }
         }
 
-        async function submitOrder(phone, items, status, source='pos', orderType='dine-in', staffName='') {
+        async function submitOrder(phone, items, status, source='pos', orderType='dine-in', staffName='', requestedRedeem=0) {
             const { addDoc, collection, serverTimestamp, doc, setDoc, getDoc } = window.firebaseModules;
             
             // IMPORTANT: Deep-copy items immediately so clearing the cart later
@@ -5415,6 +5578,10 @@ function filterMenu(text) {
                 kotStatus: null,        // KOT status: null | 'preparing' | 'completed'
                 orderSource: source,    // 'pos' | 'customer'
                 orderType: orderType,   // 'dine-in' | 'delivery'
+                // Bonus the customer asked to spend. A REQUEST only — the counter
+                // re-checks the live balance and can override it before billing.
+                // Delivery orders never redeem.
+                requestedRedeem: (orderType === 'delivery') ? 0 : Math.max(0, parseInt(requestedRedeem) || 0),
                 staffName: staffName    // operational staff who took the order
                 });
             } catch(e) {
@@ -5676,13 +5843,27 @@ function renderAdminHistory() {
             // Bill send buttons + "sent" indicators (completed orders only)
             const waBadge = `<span id="billsent-${o.id}-whatsapp" style="background:#25D366; color:#000; padding:2px 7px; border-radius:3px; font-size:0.65rem; font-weight:bold; ${o.billSentWA ? '' : 'display:none;'}">✅ WA Sent</span>`;
             const smsBadge = `<span id="billsent-${o.id}-sms" style="background:#00B4FF; color:#000; padding:2px 7px; border-radius:3px; font-size:0.65rem; font-weight:bold; ${o.billSentSMS ? '' : 'display:none;'}">✅ SMS Sent</span>`;
+            // Unpaid sends are tracked apart from paid ones: a COD bill goes out
+            // hours before the money arrives, so "bill sent" must never read as
+            // "order paid".
+            const uwaBadge = `<span id="billsent-${o.id}-unpaid-whatsapp" style="background:#FF9500; color:#000; padding:2px 7px; border-radius:3px; font-size:0.65rem; font-weight:bold; ${o.unpaidBillSentWA ? '' : 'display:none;'}">📄 Unpaid WA Sent</span>`;
+            const usmsBadge = `<span id="billsent-${o.id}-unpaid-sms" style="background:#FF9500; color:#000; padding:2px 7px; border-radius:3px; font-size:0.65rem; font-weight:bold; ${o.unpaidBillSentSMS ? '' : 'display:none;'}">📄 Unpaid SMS Sent</span>`;
+            const nextType = o.orderType === 'delivery' ? 'dine-in' : 'delivery';
+            const unbilled = (o.status !== 'completed' && o.status !== 'cancelled');
             const sendRow = o.status === 'completed' ? `
                 <div class="flex gap-2" style="margin-top:10px; align-items:center; flex-wrap:wrap; border-top:1px solid rgba(255,255,255,0.08); padding-top:8px;">
                     <button class="btn btn-success btn-sm" style="background:#25D366; border:none; color:#000;" onclick="event.stopPropagation(); sendBillFromHistory('${o.phone}', '${o.id}', 'whatsapp')">📱 WA Bill</button>
                     <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); sendBillFromHistory('${o.phone}', '${o.id}', 'sms')">💬 SMS Bill</button>
                     ${waBadge}
                     ${smsBadge}
-                </div>` : '';
+                </div>` : (unbilled ? `
+                <div class="flex gap-2" style="margin-top:10px; align-items:center; flex-wrap:wrap; border-top:1px solid rgba(255,255,255,0.08); padding-top:8px;">
+                    <button class="btn btn-success btn-sm" style="background:#25D366; border:none; color:#000;" onclick="event.stopPropagation(); sendUnpaidBill('${o.phone}', '${o.id}', 'whatsapp')">📄 WA Bill (unpaid)</button>
+                    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); sendUnpaidBill('${o.phone}', '${o.id}', 'sms')">💬 SMS</button>
+                    <button class="btn btn-warning btn-sm" onclick="event.stopPropagation(); switchOrderType('${o.id}', '${nextType}', '${o.orderType || 'dine-in'}')">🔄 To ${nextType === 'delivery' ? 'Delivery' : 'Dine-in'}</button>
+                    ${uwaBadge}
+                    ${usmsBadge}
+                </div>` : '');
 
             return `
             <div class="order-card" onclick="viewOrderDetails('${o.id}')" style="cursor:pointer;">
@@ -5718,6 +5899,15 @@ const customerDisplay = o.customerName
                 // "Accept (Paid)" opens the payment modal so the order is COMPLETED directly
                 // (skips pending → can't be lost/deleted as an unpaid pending order).
                 const pendingLabel = isDelivery ? '💵 Accept (COD)' : '🍽️ Accept (Pay later)';
+                // The customer asked to spend points from their own phone. Surfaced
+                // here so the counter knows before it opens the payment screen.
+                const redeemBadge = (o.requestedRedeem > 0 && o.orderType !== 'delivery')
+                    ? `<span style="font-size:0.65rem; margin-left:6px; padding:1px 6px; border-radius:4px; background:rgba(0,229,160,0.2); color:var(--success); font-weight:700;">🎁 wants ${o.requestedRedeem} pts</span>`
+                    : '';
+                // Dine-in ⇄ delivery, while the order is still unbilled. Re-prices
+                // the order under the destination type's rules.
+                const nextType = o.orderType === 'delivery' ? 'dine-in' : 'delivery';
+                const switchBtn = `<button class="btn btn-warning btn-sm w-full" style="font-size:0.72rem;" onclick="event.stopPropagation(); switchOrderType('${o.id}', '${nextType}', '${o.orderType || 'dine-in'}')">🔄 To ${nextType === 'delivery' ? '🚚 Delivery' : '🍽️ Dine-in'}</button>`;
                 const buttonRow = `
                     <div class="flex gap-2" style="margin-top:10px;">
                         <button class="btn btn-sm w-full" style="background:#25D366; color:#000; border:none;" onclick="sendDeliveryQR('${o.phone}', ${o.total}, '${safeName}')">📤 Send QR</button>
@@ -5726,6 +5916,11 @@ const customerDisplay = o.customerName
                     <div class="flex gap-2" style="margin-top:6px;">
                         <button class="btn btn-secondary btn-sm w-full" onclick="updateOrderStatus('${o.id}', 'pending')">${pendingLabel}</button>
                         <button class="btn btn-danger btn-sm w-full" onclick="updateOrderStatus('${o.id}', 'cancelled')">Reject</button>
+                    </div>
+                    <div class="flex gap-2" style="margin-top:6px;">
+                        ${switchBtn}
+                        <button class="btn btn-sm w-full" style="background:#25D366; color:#000; border:none; font-size:0.72rem;" onclick="sendUnpaidBill('${o.phone}', '${o.id}', 'whatsapp')">📄 WA Bill (unpaid)</button>
+                        <button class="btn btn-secondary btn-sm w-full" style="font-size:0.72rem;" onclick="sendUnpaidBill('${o.phone}', '${o.id}', 'sms')">💬 SMS</button>
                     </div>`;
 
                 return `
@@ -5735,6 +5930,7 @@ const customerDisplay = o.customerName
                             <span class="order-status status-requested">REQUESTED</span>
                             <span class="text-muted" style="font-size:0.75rem;">${timeStr}</span>
                             ${typeBadge}
+                            ${redeemBadge}
                         </div>
                         <strong style="font-size:1.1rem;">₹${o.total}</strong>
                     </div>
@@ -5799,18 +5995,29 @@ const customerDisplay = o.customerName
                     ? `<span style="background:rgba(255,149,0,0.18); color:#FF9500; padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">🚚 DELIVERY</span>`
                     : `<span style="background:rgba(0,229,160,0.15); color:var(--success); padding:2px 6px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:5px;">🍽️ DINE-IN</span>`;
 
-                // Edit button logic:
+                // Edit button logic. An unpaid order is never fully locked —
+                // the kitchen only locks the lines it has already taken.
                 // - No kotStatus: full edit allowed
-                // - preparing: add-only mode (show warning label)
-                // - completed: fully locked
+                // - preparing / completed: add-only mode
                 let editBtn;
                 if(!kotStatus) {
                     editBtn = `<button class="btn btn-secondary w-full" onclick="editOrder('${o.id}')">✏️ Edit</button>`;
                 } else if(kotStatus === 'preparing') {
-                    editBtn = `<button class="btn btn-warning w-full" onclick="editOrder('${o.id}')" style="font-size:0.8rem;" title="Add items only — cannot remove what kitchen is preparing">➕ Add Items</button>`;
+                    editBtn = `<button class="btn btn-warning w-full" onclick="editOrder('${o.id}')" style="font-size:0.8rem;" title="Add items only — cannot remove what the kitchen is preparing">➕ Add Items</button>`;
                 } else {
-                    editBtn = `<button class="btn btn-secondary w-full" disabled style="opacity:0.4; cursor:not-allowed;" title="Kitchen has completed this order">🔒 Locked</button>`;
+                    editBtn = `<button class="btn btn-warning w-full" onclick="editOrder('${o.id}')" style="font-size:0.8rem;" title="Add items only — the kitchen has already made the existing items. Added items go back to the kitchen.">➕ Add Items</button>`;
                 }
+
+                // The customer asked to spend points from their own phone. Surfaced
+                // here so the counter knows before it opens the payment screen.
+                const redeemBadge = (o.requestedRedeem > 0 && o.orderType !== 'delivery')
+                    ? `<span style="font-size:0.65rem; margin-left:6px; padding:1px 6px; border-radius:4px; background:rgba(0,229,160,0.2); color:var(--success); font-weight:700;">🎁 wants ${o.requestedRedeem} pts</span>`
+                    : '';
+                // Dine-in ⇄ delivery, while the order is still unbilled. Re-prices
+                // the order under the destination type's rules.
+                const nextType = o.orderType === 'delivery' ? 'dine-in' : 'delivery';
+                const switchBtn = `<button class="btn btn-warning btn-sm w-full" style="font-size:0.72rem;" onclick="event.stopPropagation(); switchOrderType('${o.id}', '${nextType}', '${o.orderType || 'dine-in'}')">🔄 To ${nextType === 'delivery' ? '🚚 Delivery' : '🍽️ Dine-in'}</button>`;
+
 
                 return `
                 <div class="order-card ${hasDiscount ? 'discount-applied' : ''}" style="position:relative;">
@@ -5822,6 +6029,7 @@ const customerDisplay = o.customerName
                                 <span class="order-status status-pending" style="font-size:0.65rem;">PENDING</span>
                                 ${sourceBadge}
                                 ${typeBadge}
+                                ${redeemBadge}
                                 <span class="text-muted" style="font-size:0.75rem; margin-left:5px;">📅 ${timeStr}</span>
                             </div>
                             <div style="margin-top:4px;">${kotBadgeHtml}</div>
@@ -5842,6 +6050,14 @@ const customerDisplay = o.customerName
     ${editBtn}
     <button class="btn btn-success w-full" onclick="openPaymentModal('${o.id}', ${o.total}, '${o.phone}')">✅ Bill</button>
 </div>
+                    <div class="flex gap-2" style="margin-top:8px;">
+                        <button class="btn btn-sm w-full" style="background:#25D366; color:#000; border:none; font-size:0.72rem;" onclick="sendUnpaidBill('${o.phone}', '${o.id}', 'whatsapp')">📄 WA Bill (unpaid)</button>
+                        <button class="btn btn-secondary btn-sm w-full" style="font-size:0.72rem;" onclick="sendUnpaidBill('${o.phone}', '${o.id}', 'sms')">💬 SMS</button>
+                    </div>
+                    <div class="flex gap-2" style="margin-top:6px;">
+                        ${switchBtn}
+                        <button class="btn btn-secondary btn-sm w-full" style="background:#444; font-size:0.72rem;" onclick="printBillDirect('${o.id}')">🖨️ Print unpaid bill</button>
+                    </div>
                 </div>
             `}).join('');
         }
@@ -5966,19 +6182,119 @@ function printKOT(orderId) {
                 if(snap.exists()) {
                     const data = snap.data();
                     // Load data into global state so sendBill() can read it
-                    PAYMENT_DATA = { 
-                        ...data, 
+                    PAYMENT_DATA = {
+                        ...data,
                         orderId: orderId,
-                        serial: data.timestamp ? data.timestamp.toMillis().toString().slice(-4) : '0000', 
-                        bonusEarned: data.bonusEarned || 0, 
-                        finalPaid: data.finalPaid || data.total, 
-                        change: data.changeReturn || 0, 
-                        mode: data.paymentMode || 'Cash' 
+                        unpaid: false,
+                        serial: data.timestamp ? data.timestamp.toMillis().toString().slice(-4) : '0000',
+                        bonusEarned: data.bonusEarned || 0,
+                        finalPaid: data.finalPaid || data.total,
+                        change: data.changeReturn || 0,
+                        mode: data.paymentMode || 'Cash'
                     };
                     // Call the main send function with the specific type
                     sendBill(type);
                 }
             });
+        }
+
+        // ── UNPAID BILL ───────────────────────────────────────────────
+        // Sends the bill for an order that has NOT been paid yet. A COD
+        // delivery order stays 'pending' until the rider returns, but the
+        // customer still needs the bill in hand — this makes that possible
+        // without faking a payment, which would have polluted the cash box and
+        // the daily audit.
+        function sendUnpaidBill(phone, orderId, type) {
+            const { doc, getDoc } = window.firebaseModules;
+            getDoc(doc(window.db, 'orders', orderId)).then(snap => {
+                if (!snap.exists()) return showToast('Order not found', 'error');
+                const data = snap.data();
+                // Paid in the meantime — send the real receipt, not a due notice.
+                if (data.status === 'completed') return sendBillFromHistory(phone, orderId, type);
+                if (data.status === 'cancelled') return showToast('Order was cancelled', 'error');
+                PAYMENT_DATA = {
+                    ...data,
+                    orderId: orderId,
+                    unpaid: true,
+                    serial: data.timestamp ? data.timestamp.toMillis().toString().slice(-4) : '0000',
+                    bonusEarned: 0,
+                    redeemed: 0,
+                    finalPaid: data.total,
+                    change: 0,
+                    mode: null
+                };
+                sendBill(type);
+            }).catch(e => showToast('Could not load order: ' + (e.message || e), 'error'));
+        }
+
+        // ── SWITCH ORDER TYPE (dine-in ⇄ delivery) ────────────────────
+        // A customer who asked for dine-in can call back and want delivery
+        // instead. The order is re-priced under the DESTINATION type's rules:
+        // delivery picks up the delivery charge, drops the parcel split, loses
+        // any requested bonus redemption, and will earn no points at billing.
+        // Switching back to dine-in removes the charge again.
+        //
+        // Blocked once the order is billed — changing the type then would move
+        // money after the fact and desync the day's audit.
+        async function switchOrderType(orderId, newType, currentType) {
+            const target = (newType === 'delivery') ? 'delivery' : 'dine-in';
+            if (target === currentType) return;
+
+            const warn = target === 'delivery'
+                ? 'Switch this order to DELIVERY?\n\n• Delivery charge applies if the order is under the minimum order value\n• Bonus points cannot be redeemed, and none will be earned\n• Parcel split is dropped — everything goes out as delivery'
+                : 'Switch this order to DINE-IN?\n\n• Delivery charge is removed\n• Bonus points can be redeemed, and 5% will be earned on payment';
+            if (!confirm(warn)) return;
+
+            const { doc, runTransaction, serverTimestamp } = window.firebaseModules;
+            let newTotal = 0, newCharge = 0;
+            try {
+                await runTransaction(window.db, async (tx) => {
+                    const ref = doc(window.db, 'orders', orderId);
+                    const snap = await tx.get(ref);
+                    if (!snap.exists()) throw new Error('Order not found');
+                    const d = snap.data();
+                    if (d.status === 'completed') throw new Error('Order is already billed — the type can no longer be changed');
+                    if (d.status === 'cancelled') throw new Error('Order was cancelled');
+
+                    const items = JSON.parse(JSON.stringify(d.items || []));
+                    items.forEach(it => {
+                        if (target === 'delivery') it.parcelQty = 0;
+                        else it.parcelQty = Math.min(Math.max(it.parcelQty || 0, 0), it.qty || 0);
+                    });
+
+                    // Re-price from the item subtotal, exactly as submitOrder does:
+                    // the delivery charge is decided BEFORE any discount, so a
+                    // coupon cannot push an order under the free-delivery threshold.
+                    const subtotal = items.reduce((s, i) => s + (i.price * i.qty), 0);
+                    const discountAmt = (d.discount && d.discount.amount > 0) ? d.discount.amount : 0;
+                    newCharge = deliveryChargeFor(subtotal, target);
+                    newTotal = subtotal - discountAmt + newCharge;
+
+                    tx.update(ref, {
+                        orderType: target,
+                        items: items,
+                        subtotal: subtotal,
+                        deliveryCharge: newCharge,
+                        total: newTotal,
+                        // Delivery never redeems, so a request made while the order
+                        // was dine-in has to go with it.
+                        requestedRedeem: target === 'delivery' ? 0 : (d.requestedRedeem || 0),
+                        typeChangedAt: serverTimestamp(),
+                        typeChangedBy: getActiveStaff() || ((STATE.user && STATE.user.email) || 'admin')
+                    });
+                });
+                showToast(`Switched to ${target === 'delivery' ? 'Delivery' : 'Dine-in'} — total ₹${newTotal}`
+                    + (newCharge > 0 ? ` (incl. ₹${newCharge} delivery charge)` : ''));
+            } catch (e) {
+                console.error(e);
+                showToast('Switch failed: ' + (e.message || e), 'error');
+            }
+        }
+
+        // Same action from the Admin order-details modal.
+        async function switchOrderTypeFromModal(newType, currentType) {
+            await switchOrderType(CURRENT_VIEW_ORDER_ID, newType, currentType);
+            closeDetailsModal();
         }
 
         async function updateOrderStatus(id, status) {
@@ -6012,15 +6328,15 @@ function printKOT(orderId) {
             getDoc(doc(window.db, 'orders', orderId)).then(snap => {
                 if(snap.exists()) {
                     const data = snap.data();
-                    // If kitchen is fully done (ready), block all editing
-                    if(data.kotStatus === 'completed') {
-                        return showToast('❌ Cannot edit — Kitchen has already completed this order', 'error');
-                    }
-                    // If kitchen is preparing: allow add-only mode (lock existing items)
-                    if(data.kotStatus === 'preparing') {
-                        // Store original items as locked — cannot reduce qty or remove
+                    // The kitchen's status decides WHAT may change, never whether
+                    // the order can be edited: an unpaid order must always accept
+                    // new items. Whatever the kitchen has accepted or already made
+                    // is locked instead — those lines cannot be reduced or removed.
+                    if(data.kotStatus === 'preparing' || data.kotStatus === 'completed') {
                         STATE.kitchenLockedItems = JSON.parse(JSON.stringify(data.items));
-                        showToast('⚠️ Kitchen is preparing — you can only ADD items', 'warning');
+                        showToast(data.kotStatus === 'completed'
+                            ? '✅ Kitchen finished this order — you can only ADD new items'
+                            : '⚠️ Kitchen is preparing — you can only ADD items', 'warning');
                     } else {
                         STATE.kitchenLockedItems = [];
                     }
@@ -6148,21 +6464,37 @@ async function deletePendingOrder(orderId) {
                     custName = custSnap.data().name || '';
                 }
 
-                // --- INVENTORY FIX ---
+                // --- INVENTORY ---
                 const orderRef = doc(window.db, 'orders', STATE.editingOrderId);
                 const oldOrderSnap = await getDoc(orderRef);
-                
-                // Only release if stock was actually blocked — prevents phantom releases
+                const oldOrderData = oldOrderSnap.exists() ? oldOrderSnap.data() : {};
+                const oldItems      = oldOrderData.items || [];
+                const oldBlocked    = !!oldOrderData.stockBlocked;
+                const oldFinalized  = !!oldOrderData.stockFinalized;
+                const oldKotStatus  = oldOrderData.kotStatus || null;
+
+                // The kitchen CONSUMES the ingredients when it marks an order ready
+                // (stockFinalized: true, stockBlocked: false). Editing such an order
+                // has to put the old consumption back before consuming the new list,
+                // or every surviving item is counted twice and the second block is
+                // never released. Mirrors the admin edit path.
+                const wasConsumed = oldFinalized || (oldOrderData.status === 'completed' && !oldBlocked);
                 let newStockBlocked = false;
-                if (oldOrderSnap.exists() && oldOrderSnap.data().stockBlocked) {
-                    const oldOrderData = oldOrderSnap.data();
-                    const oldItems = oldOrderData.items || [];
+                let newFinalized = false;
+
+                if (wasConsumed) {
+                    await restoreIngredientStock(oldItems);
+                    newStockBlocked = await blockIngredientStock(itemsSnapshot);
+                    if (newStockBlocked) await deductBlockedStock(itemsSnapshot, 'reserved-v2');
+                    newFinalized = newStockBlocked;   // stays in the consumed state
+                } else if (oldBlocked) {
                     await releaseIngredientStock(oldItems, oldOrderData.stockModel || 'legacy-block-deducted');
+                    newStockBlocked = await blockIngredientStock(itemsSnapshot);
+                } else {
+                    // Nothing was ever blocked (e.g. no recipes at order time)
+                    newStockBlocked = await blockIngredientStock(itemsSnapshot);
                 }
-                
-                // Block stock for updated items
-                newStockBlocked = await blockIngredientStock(itemsSnapshot);
-                // --- END INVENTORY FIX ---
+                // --- END INVENTORY ---
 
                 // 3. Update the Order
                 const posEditDelivery = deliveryChargeFor(total, STATE.orderType);
@@ -6177,11 +6509,20 @@ async function deletePendingOrder(orderId) {
                     phone: newPhone,
                     customerName: custName,
                     orderType: STATE.orderType,
-                    stockBlocked: newStockBlocked,
-                    stockModel: newStockBlocked ? 'reserved-v2' : null
+                    stockBlocked: wasConsumed ? false : newStockBlocked,
+                    stockModel: newStockBlocked ? 'reserved-v2' : null,
+                    stockFinalized: newFinalized
                 });
-                
+
                 showToast('Order & Phone Updated');
+
+                // Items added to an order the kitchen already finished have to go
+                // back on the kitchen board, or they are billed but never made.
+                if (oldKotStatus === 'completed' &&
+                    kitchenItemSignature(oldItems) !== kitchenItemSignature(itemsSnapshot)) {
+                    await reopenKitchenTicket(STATE.editingOrderId);
+                }
+
                 clearCart();
                 switchOutletTab('current');
 
@@ -6296,12 +6637,24 @@ async function deletePendingOrder(orderId) {
             
             let hasCoupon = false;
             let isDelivery = false;
+            let requestedRedeem = 0;
             if (orderSnap.exists()) {
                 const orderData = orderSnap.data();
                 hasCoupon = orderData.discount && orderData.discount.code;
                 PAYMENT_DATA.hasCoupon = hasCoupon;
                 PAYMENT_DATA.orderType = orderData.orderType || 'dine-in';
                 isDelivery = PAYMENT_DATA.orderType === 'delivery';
+                requestedRedeem = Math.max(0, parseInt(orderData.requestedRedeem) || 0);
+
+                // The list card's total can be stale — the order may have been
+                // re-priced by an edit or a dine-in/delivery switch since it was
+                // rendered. The saved document is authoritative.
+                const liveTotal = Number(orderData.total);
+                if (!isNaN(liveTotal) && liveTotal !== PAYMENT_DATA.total) {
+                    PAYMENT_DATA.total = liveTotal;
+                    document.getElementById('payBillTotal').innerText = '₹' + liveTotal;
+                    document.getElementById('payNetTotal').innerText = '₹' + liveTotal;
+                }
             }
 
             // Fetch Customer Points
@@ -6350,6 +6703,19 @@ async function deletePendingOrder(orderId) {
                 maxButton.style.cursor = 'pointer';
                 bonusInfoText.innerHTML = '1 Point = ₹1 | New bonus valid for ' + POINT_VALIDITY_DAYS + ' days.';
                 bonusInfoText.style.color = '';
+
+                // The customer asked for a redemption from their own phone.
+                // Prefill it so nobody has to be told verbally, clamped to the
+                // live balance — staff can still change it before confirming,
+                // and the payment transaction re-validates regardless.
+                if (requestedRedeem > 0) {
+                    const capped = Math.min(requestedRedeem, PAYMENT_DATA.maxPoints, PAYMENT_DATA.total);
+                    redeemInput.value = capped > 0 ? capped : '';
+                    bonusInfoText.innerHTML = `📱 Customer requested <b>${requestedRedeem} pts</b>`
+                        + (capped < requestedRedeem ? ` — only <b>${capped}</b> usable right now` : '')
+                        + '. Staff can change this.';
+                    bonusInfoText.style.color = 'var(--primary)';
+                }
             }
             updatePaymentCalc();
         }
@@ -6524,17 +6890,22 @@ async function deletePendingOrder(orderId) {
         // --- BILL SENT TRACKER ---
         // Records on the order document that a bill was sent (WA/SMS),
         // so the Admin panel can show a "sent" indicator.
-        async function markBillSent(orderId, type) {
+        // `unpaid` keeps the two apart: a COD bill can go out hours before the
+        // money arrives, so "bill sent" must never read as "order paid".
+        async function markBillSent(orderId, type, unpaid) {
             if (!orderId) return;
+            const prefix = unpaid ? 'unpaid-' : '';
             // Instant UI feedback if the badge is on screen (admin order list)
-            const badge = document.getElementById(`billsent-${orderId}-${type}`);
+            const badge = document.getElementById(`billsent-${orderId}-${prefix}${type}`);
             if (badge) badge.style.display = '';
             try {
                 const { doc, updateDoc, serverTimestamp } = window.firebaseModules;
-                const key = type === 'whatsapp' ? 'billSentWA' : 'billSentSMS';
+                const key = unpaid
+                    ? (type === 'whatsapp' ? 'unpaidBillSentWA' : 'unpaidBillSentSMS')
+                    : (type === 'whatsapp' ? 'billSentWA' : 'billSentSMS');
                 await updateDoc(doc(window.db, 'orders', orderId), {
                     [key]: true,
-                    billSentAt: serverTimestamp()
+                    [unpaid ? 'unpaidBillSentAt' : 'billSentAt']: serverTimestamp()
                 });
             } catch (e) { console.error('markBillSent failed:', e); }
         }
@@ -6543,57 +6914,96 @@ async function deletePendingOrder(orderId) {
             const s = STATE.storeSettings || { name: 'Juice Therapy Majherhati', address: '', footer: 'Thank you!', link: '' };
             const d = PAYMENT_DATA;
             const date = new Date().toLocaleString('en-IN');
-            
+            const unpaid = !!d.unpaid;
+
+            // A bonus the customer asked for but that has not been consumed yet.
+            // Shown as a provisional deduction so the amount due matches what
+            // they will actually hand over, with the "confirmed at billing"
+            // caveat spelled out — the counter re-checks the live balance.
+            const dueRedeem = unpaid
+                ? Math.min(Math.max(0, parseInt(d.requestedRedeem) || 0), d.total || 0)
+                : 0;
+            const amountDue = (d.total || 0) - dueRedeem;
+
             let text = `🧾 *${s.name}*\n${s.address}\n\n`;
             text += `--------------------------------\n`;
-            text += `*BILL RECEIPT* #${d.serial}\nDate: ${date}\nCustomer: ${d.phone}\n`;
+            text += `*${unpaid ? 'BILL — PAYMENT PENDING' : 'BILL RECEIPT'}* #${d.serial}\nDate: ${date}\nCustomer: ${d.phone}\n`;
             text += `Order Type: ${d.orderType === 'delivery' ? 'Delivery' : 'Dine-in'}\n`;
             text += `--------------------------------\n`;
-            
+
             if(d.items) {
                 d.items.forEach(i => {
                     text += `${i.name} x ${i.qty} = ₹${i.price * i.qty}\n`;
                 });
             }
-            
+
             text += `--------------------------------\n`;
-            text += `Total Amount:   ₹${d.total}\n`;
-            if(d.redeemed > 0) text += `Bonus Used:    -₹${d.redeemed}\n`;
-            text += `--------------------------------\n`;
-            text += `*NET PAYABLE:   ₹${d.finalPaid}*\n`;
-            text += `Paid via:       ${d.mode}\n`;
-            
-            if(d.mode === 'Cash') {
-                text += `Cash Given:     ₹${d.cashGiven}\n`;
-                text += `Return Change:  ₹${d.change}\n`;
-            } else if(d.mode === 'Partial') {
-                text += `  💵 Cash:      ₹${d.partialCash}\n`;
-                text += `  📱 Online:    ₹${d.partialOnline}\n`;
+            // Break the total down whenever something sits between the item
+            // subtotal and the amount charged, so a delivery charge is never a
+            // silent difference the customer has to work out for themselves.
+            const billDiscount = (d.discount && d.discount.amount > 0) ? d.discount.amount : 0;
+            const billDelivery = Number(d.deliveryCharge) || 0;
+            if((billDiscount > 0 || billDelivery > 0) && d.subtotal !== undefined) {
+                text += `Subtotal:       ₹${d.subtotal}\n`;
+                if(billDiscount > 0) text += `Discount (${d.discount.code}): -₹${billDiscount}\n`;
+                if(billDelivery > 0) text += `Delivery Charge: +₹${billDelivery}\n`;
             }
-            
+            text += `Total Amount:   ₹${d.total}\n`;
+            if(!unpaid && d.redeemed > 0) text += `Bonus Used:    -₹${d.redeemed}\n`;
+            if(dueRedeem > 0) text += `Bonus to apply: -₹${dueRedeem} (confirmed at billing)\n`;
             text += `--------------------------------\n`;
-            if(d.bonusEarned > 0) {
+
+            if(unpaid) {
+                text += `*AMOUNT DUE:    ₹${amountDue}*\n`;
+                text += `⚠️ PAYMENT STATUS: UNPAID\n`;
+                text += d.orderType === 'delivery'
+                    ? `Payable on delivery (COD).\n`
+                    : `Payable at the counter.\n`;
+            } else {
+                text += `*NET PAYABLE:   ₹${d.finalPaid}*\n`;
+                text += `Paid via:       ${d.mode}\n`;
+
+                if(d.mode === 'Cash') {
+                    text += `Cash Given:     ₹${d.cashGiven}\n`;
+                    text += `Return Change:  ₹${d.change}\n`;
+                } else if(d.mode === 'Partial') {
+                    text += `  💵 Cash:      ₹${d.partialCash}\n`;
+                    text += `  📱 Online:    ₹${d.partialOnline}\n`;
+                }
+            }
+
+            text += `--------------------------------\n`;
+            if(!unpaid && d.bonusEarned > 0) {
                 text += `Points Earned:  +${d.bonusEarned}\n`;
                 text += `--------------------------------\n`;
             }
             text += `${s.footer}\n${s.link}`;
 
             const encoded = encodeURIComponent(text);
-            
+
             if (type === 'whatsapp') {
                 window.open(`https://wa.me/91${d.phone}?text=${encoded}`, '_blank');
             } else {
-                const shortText = d.bonusEarned > 0
-                    ? `Bill for ${s.name}: ₹${d.finalPaid} paid. Points earned: ${d.bonusEarned}. Thanks!`
-                    : `Bill for ${s.name}: ₹${d.finalPaid} paid. Thank you!`;
+                let shortText;
+                if (unpaid) {
+                    shortText = `${s.name}: your bill is ₹${amountDue} — PAYMENT PENDING. `
+                        + (d.orderType === 'delivery' ? 'Payable on delivery.' : 'Payable at the counter.');
+                } else {
+                    shortText = d.bonusEarned > 0
+                        ? `Bill for ${s.name}: ₹${d.finalPaid} paid. Points earned: ${d.bonusEarned}. Thanks!`
+                        : `Bill for ${s.name}: ₹${d.finalPaid} paid. Thank you!`;
+                }
                 window.open(`sms:${d.phone}?body=${encodeURIComponent(shortText)}`, '_blank');
             }
             // Record that the bill was sent (shows indicator in Admin panel)
-            markBillSent(d.orderId, type);
+            markBillSent(d.orderId, type, unpaid);
         }
 
         // --- CUSTOMER PANEL ---
         function switchCustTab(tab) {
+            // The balance moves whenever the counter bills an order, so re-read it
+            // rather than let the redemption cap drift from what the outlet sees.
+            if (tab === 'menu' && typeof refreshCustomerPoints === 'function') refreshCustomerPoints();
             document.getElementById('btn-cust-menu').classList.toggle('active', tab === 'menu');
             document.getElementById('btn-cust-history').classList.toggle('active', tab === 'history');
             document.getElementById('cust-view-menu').classList.toggle('hidden', tab !== 'menu');
@@ -6942,31 +7352,50 @@ async function printBillDirect(orderId) {
         }
         
         addText(`Total:  ${order.total}\n`);
-        
+
+        // An order that has not been billed prints as an amount-due invoice
+        // rather than a receipt — COD delivery orders are handed over long
+        // before the money comes back. `order.status` is absent on the
+        // just-paid PAYMENT_DATA fallback, which correctly reads as paid.
+        const billUnpaid = !!(order.status && order.status !== 'completed');
+        const printRedeem = billUnpaid
+            ? Math.min(Math.max(0, parseInt(order.requestedRedeem) || 0), order.total || 0)
+            : 0;
+
         if(order.redeemed > 0) {
             addText(`Bonus Used: -${order.redeemed}\n`);
+        } else if(printRedeem > 0) {
+            addText(`Bonus to apply: -${printRedeem}\n`);
+            addText(`(confirmed at billing)\n`);
         }
-        
+
         addCmd(0x1B, 0x45, 1); // Bold ON
-        const finalPay = order.finalPaid !== undefined ? order.finalPaid : order.total;
-        addText(`NET PAYABLE:  ${finalPay}\n`);
+        const finalPay = billUnpaid
+            ? (order.total - printRedeem)
+            : (order.finalPaid !== undefined ? order.finalPaid : order.total);
+        addText(`${billUnpaid ? 'AMOUNT DUE' : 'NET PAYABLE'}:  ${finalPay}\n`);
         addCmd(0x1B, 0x45, 0); // Bold OFF
-        
-        addText(`Mode: ${order.paymentMode || 'Cash'}\n`);
-        
-        // Cash Details
-        // Check both Order object and Payment Data fallback
-        const cashGiven = order.cashGiven || PAYMENT_DATA.cashGiven;
-        const change = order.changeReturn || PAYMENT_DATA.change;
-        
-        if(order.paymentMode === 'Cash' && cashGiven) {
-            addText(`Cash Given:  ${cashGiven}\n`);
-            addText(`Change:  ${change}\n`);
-        } else if(order.paymentMode === 'Partial') {
-            const partialCash = order.cashAmount || PAYMENT_DATA.partialCash || 0;
-            const partialOnline = order.onlineAmount || PAYMENT_DATA.partialOnline || 0;
-            addText(`  Cash:  ${partialCash}\n`);
-            addText(`  Online:  ${partialOnline}\n`);
+
+        if(billUnpaid) {
+            addText(`*** UNPAID ***\n`);
+            addText(order.orderType === 'delivery' ? `Pay on delivery (COD)\n` : `Pay at the counter\n`);
+        } else {
+            addText(`Mode: ${order.paymentMode || 'Cash'}\n`);
+
+            // Cash Details
+            // Check both Order object and Payment Data fallback
+            const cashGiven = order.cashGiven || PAYMENT_DATA.cashGiven;
+            const change = order.changeReturn || PAYMENT_DATA.change;
+
+            if(order.paymentMode === 'Cash' && cashGiven) {
+                addText(`Cash Given:  ${cashGiven}\n`);
+                addText(`Change:  ${change}\n`);
+            } else if(order.paymentMode === 'Partial') {
+                const partialCash = order.cashAmount || PAYMENT_DATA.partialCash || 0;
+                const partialOnline = order.onlineAmount || PAYMENT_DATA.partialOnline || 0;
+                addText(`  Cash:  ${partialCash}\n`);
+                addText(`  Online:  ${partialOnline}\n`);
+            }
         }
 
         addText("--------------------------------\n");
